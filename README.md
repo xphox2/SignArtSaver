@@ -6,6 +6,31 @@ Designed for servers where painted-sign art is a feature, not a one-wipe novelty
 
 ---
 
+## Screenshots
+
+**Painted sign in-world** — applied from a saved slot via the browse panel.
+![Painted sign in-world](screenshots/06-painted-sign.png)
+
+**My Library** — your personal slot inventory. Save, rename, apply, publish, share.
+![My Library tab](screenshots/01-my-library.png)
+
+**Public Gallery** — server-wide browseable art contributed by any artist.
+![Public Gallery tab](screenshots/02-public-gallery.png)
+
+**Preview modal** — full-size preview at the slot's native canvas dimensions.
+![Preview modal](screenshots/03-preview-modal.png)
+
+**Share modal** — grant a specific buyer copy access (commission / sell workflow).
+![Share modal](screenshots/04-share-modal.png)
+
+**Shared With Me** — slots other artists have shared with you.
+![Shared With Me tab](screenshots/05-shared-with-me.png)
+
+**Help & Information** — in-game help reference.
+![Help & Information](screenshots/07-help-information.png)
+
+---
+
 ## Quick start
 
 1. Install [Sign Artist](https://umod.org/plugins/sign-artist) (required dep).
