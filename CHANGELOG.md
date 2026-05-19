@@ -3,7 +3,7 @@
 All notable changes to SignArtSaver will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.11.13] — 2026-05-19
+## [0.11.14] — 2026-05-19
 
 First public release. The plugin has been in private development for some time;
 this is the first version cleaned up and audited for general use. The 0.x
@@ -82,6 +82,9 @@ what you've customized.
   `signartsaver.admin`); permissions auto-register on first load.
 - Operator-friendly clamps + warnings in `ValidateConfig` for every
   configurable knob.
+- Explicit `// Reference: Facepunch.System` and `// Reference: Rust.Data`
+  directives so uMod's submission compiler can resolve `ListHashSet<>` and
+  `NetworkableId` (Carbon auto-links both; Oxide doesn't).
 
 ### Notes
 - The `[JsonProperty]` description strings ARE the config keys — editing one between versions resets that field to the new default on upgrade. v1.0 onwards we'll treat these as stable.

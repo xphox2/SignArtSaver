@@ -1,5 +1,7 @@
 // Requires: SignArtist
 // Reference: System.Drawing
+// Reference: Facepunch.System
+// Reference: Rust.Data
 //
 // SignArtSaver — per-player image library for painted signs, photo frames,
 // carvable pumpkins, neon signs, and artist canvases. Two capture paths
@@ -74,7 +76,7 @@ using SDRectangle = System.Drawing.Rectangle;
 
 namespace Oxide.Plugins
 {
-    [Info("SignArtSaver", "Xphox", "0.11.13")]
+    [Info("SignArtSaver", "Xphox", "0.11.14")]
     [Description("Per-player image library with public gallery: byte-mode save + auto-resize on apply + Sign Artist URL capture + self-heal on connect/timer. Covers Signage, PhotoFrame, CarvablePumpkin. Survives wipes.")]
     public class SignArtSaver : RustPlugin
     {
