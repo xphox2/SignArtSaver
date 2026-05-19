@@ -1,6 +1,6 @@
 # SignArtSaver
 
-A persistent per-player image library for Rust signs, photo frames, banners, carvable pumpkins, paintable windows, neon signs, artist canvases, and reactive targets. Built on top of [Sign Artist](https://umod.org/plugins/sign-artist) (Whispers88) — required dep.
+A persistent per-player image library for Rust signs, photo frames, banners, carvable pumpkins, neon signs, and artist canvases. Built on top of [Sign Artist](https://umod.org/plugins/sign-artist) (Whispers88) — required dep.
 
 Designed for servers where painted-sign art is a feature, not a one-wipe novelty: every artist on the server gets their own gallery that survives wipes, a public-gallery surface for sharing creations, and a commission/sell workflow with per-slot buyer access. Art is captured at apply time as both URL (for human reference) and raw PNG bytes (for reliable replay even after Discord-CDN expiry or `/sil` URL rot).
 
@@ -51,7 +51,7 @@ That's it. Players can paint, save, browse, share, and re-apply across wipes.
 
 | Component | Minimum | Notes |
 |---|---|---|
-| Rust dedicated server | Current build with `PaintedItemStorageEntity` | Older Rust (pre-2024 draftish) lacks the type — plugin will fail to load with a clear error. |
+| Rust dedicated server | Current build with `Signage` / `PhotoFrame` / `CarvablePumpkin` types | Standard since the painted-sign system shipped. |
 | Sign Artist | v1.4.x | Hard dep. Plugin self-unloads if absent. |
 | `libgdiplus` (Linux) | Any recent | For System.Drawing PNG resizing. |
 | Carbon framework | Any current | Oxide-compatible; both supported. |
@@ -198,7 +198,7 @@ For diagnosing a recurring trigger, set `Self-heal diagnostic: periodic scan int
 
 ## Localization
 
-The most-visible player-facing strings — common error responses, permission denials, ownership refusals, the highest-traffic confirmations — live in `oxide/lang/<locale>/SignArtSaver.json` (Carbon: `carbon/lang/<locale>/`). English defaults are auto-generated on first load; community translations can be dropped in by adding a new `<locale>/SignArtSaver.json` file with the same keys. 41 keys today; fuller coverage (usage hints, help-body text, share/unshare overviews, diagnostic raycast output) is planned for a future release.
+Every player-facing string — usage hints, error responses, permission denials, the help-body text, share/unshare overviews, the `/saveart debug` raycast output, the whole confirmation surface — lives in `oxide/lang/<locale>/SignArtSaver.json` (Carbon: `carbon/lang/<locale>/`). English defaults are auto-generated on first load; community translations can be dropped in by adding a new `<locale>/SignArtSaver.json` file with the same keys. 115 keys total.
 
 Translators: `string.Format` placeholders (`{0}`, `{1}`, etc.) for parameterized templates. If a translation has a placeholder/arg-count mismatch, the helper falls back to the English default with a `PrintWarning` so the operator can spot the bad translation.
 
@@ -209,7 +209,7 @@ Server-operator log messages (`Puts`, `PrintWarning`, `PrintError`) stay English
 ## Known limitations
 
 - **Sign Artist version pin** — audited against 1.4.x. Versions outside that range print a startup warning; auto-capture and replay may silently miss if the hook signature or API_Skin* arguments change.
-- **Older Rust builds** — the plugin references `PaintedItemStorageEntity` directly. Servers running a Rust build that pre-dates that type will fail to load; an alternative dynamic-type fallback is planned but not in this release.
+- **No support for drawable windows / paintable reactive targets / spinning wheels** — those use `PaintedItemStorageEntity` which the plugin doesn't currently target (the uMod policy against `System.Reflection` makes the canonical write path unavailable). Standard signs, photo frames, banners, hanging signs, neon signs, artist canvases, carvable pumpkins, and all DLC art frames are fully supported.
 - **Discord CDN URLs** — Discord rotates CDN URLs ~24 hours. A slot's URL goes stale, but the cached bytes survive wipes and are preferred on apply. Players save imgur / GitHub raw / their own host for URL durability.
 - **Auto-capture timing** — Sign Artist's `OnImagePost` fires synchronously; the actual download finishes a few seconds later. SignArtSaver defers the byte capture via a 5-second retry-poll. On slow CDNs the slot is saved URL-only and bytes can be back-filled by re-running `/saveart save` while aimed at the painted sign.
 

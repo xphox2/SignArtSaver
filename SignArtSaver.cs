@@ -1,8 +1,9 @@
+// Requires: SignArtist
 // Reference: System.Drawing
 //
 // SignArtSaver — per-player image library for painted signs, photo frames,
-// carvable pumpkins, paintable windows, neon signs, artist canvases, and
-// reactive targets. Two capture paths feed one library:
+// carvable pumpkins, neon signs, and artist canvases. Two capture paths
+// feed one library:
 //
 //   1) URL auto-capture — subscribes to Sign Artist's OnImagePost hook;
 //      whenever an artist runs /sil <url>, both the URL and the rendered
@@ -10,7 +11,7 @@
 //      Sign Artist's download is async).
 //   2) Byte-mode manual save — /saveart save reads the image bytes directly
 //      off the painted sign you're aiming at via FileStorage. Works on any
-//      painted sign — vanilla painter, Sign Artist, drawable windows, etc.
+//      painted sign — vanilla painter, Sign Artist, neon signs, etc.
 //      No URL needed; survives Discord-CDN expiry forever.
 //
 // Bytes are stored as PNG files under <data-dir>/SignArtSaver/images/
@@ -20,8 +21,7 @@
 // shared-with-me) refuse URL fallback by design — prevents SSRF.
 //
 // REQUIREMENTS:
-//   - Rust dedicated server (any current build with PaintedItemStorageEntity;
-//     pre-2024 builds will fail to load — older Rust lacked the type).
+//   - Rust dedicated server (any current build).
 //   - Sign Artist plugin by Whispers88, v1.4.x (hard dep — plugin self-unloads
 //     if absent). Available on uMod.
 //   - libgdiplus on Linux hosts (apt: `libgdiplus`). System.Drawing uses it
@@ -59,7 +59,6 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using Newtonsoft.Json;
@@ -75,8 +74,8 @@ using SDRectangle = System.Drawing.Rectangle;
 
 namespace Oxide.Plugins
 {
-    [Info("SignArtSaver", "Xphox", "0.11.11")]
-    [Description("Per-player image library with public gallery: byte-mode save + auto-resize on apply + Sign Artist URL capture + self-heal on connect/timer. Covers Signage, PhotoFrame, CarvablePumpkin, PaintedItemStorageEntity. Survives wipes.")]
+    [Info("SignArtSaver", "Xphox", "0.11.12")]
+    [Description("Per-player image library with public gallery: byte-mode save + auto-resize on apply + Sign Artist URL capture + self-heal on connect/timer. Covers Signage, PhotoFrame, CarvablePumpkin. Survives wipes.")]
     public class SignArtSaver : RustPlugin
     {
         [PluginReference] private Plugin SignArtist;
@@ -91,21 +90,6 @@ namespace Oxide.Plugins
         private const string KindSign       = "Sign";
         private const string KindPhotoFrame = "PhotoFrame";
         private const string KindPumpkin    = "Pumpkin";
-        // PaintedItemStorageEntity (v0.11.1) — drawable windows, paintable reactive targets,
-        // anything else that holds painted bytes via a private _currentImageCrc field instead
-        // of Signage's textureIDs[]/PhotoFrame's _overlayTextureCrc. Sibling class to all
-        // three above (extends BaseEntity directly).
-        private const string KindPaintedItem = "PaintedItem";
-
-        // Reflection cache for PaintedItemStorageEntity._currentImageCrc — the field is
-        // private with no public setter; the only vanilla write path is the Server_UpdateImage
-        // RPC (which gates by item-in-inventory). For self-heal/apply we set the field
-        // directly. If a future Rust patch renames the field, _paintedItemCrcField goes null
-        // and the apply path fails gracefully with a clear error rather than NRE'ing.
-        private static readonly FieldInfo _paintedItemCrcField =
-            typeof(PaintedItemStorageEntity).GetField(
-                "_currentImageCrc",
-                BindingFlags.Instance | BindingFlags.NonPublic);
 
         // CUI element ids — strict SignArtSaver.* namespace to avoid collisions.
         private const string UiPanel       = "SignArtSaver.Ui.Panel";
@@ -201,10 +185,6 @@ namespace Oxide.Plugins
             ["scrapframe.large"]            = ("Scrap Frame Large",       256, 1024),
             ["scrapframe.xl"]               = ("Scrap Frame XL",          512, 512),
             ["scrapframe.xxl"]              = ("Scrap Frame XXL",         1024, 512),
-            // Other paintable entities — added v0.11.1
-            ["spinner.wheel.deployed"]      = ("Spinning Wheel",          512, 512),
-            ["paintable_reactive_target.deployed"] = ("Paintable Reactive Target", 256, 256),
-            ["window.paintable"]            = ("Paintable Window",        512, 256),
         };
 
         #endregion
@@ -444,6 +424,119 @@ namespace Oxide.Plugins
                 ["UnshareNotOnList"]   = "<color=#7ad>{0}</color> wasn't on slot {1}'s buyer list.",
                 ["UnshareDone"]        = "<color=#ffcc55>Revoked</color> <color=#7ad>{0}</color> from slot {1}. Remaining buyers: {2}.",
                 ["UnshareEmpty"]       = "Slot {0} has no buyers to revoke.",
+
+                // --- Slot lookup errors ---
+                ["SlotNoLongerExists"]     = "Slot {0} no longer exists.",
+                ["SlotNotInLibrary"]       = "No such slot ({0}) in your library.",
+                ["SlotNotFoundShort"]      = "Slot {0} not found.",
+                ["SlotMissingInOwnerLib"]  = "Slot {0} no longer exists in {1}'s library.",
+                ["SlotNotPublic"]          = "Public slot {0} not found (or unpublished).",
+                ["SlotIsPrivate"]          = "That slot is private.",
+                ["SlotUrlOnlyShare"]       = "Slot {0} is URL-only; can't share without bytes.",
+                ["SlotUrlOnlyPreview"]     = "URL-only slots can't be previewed (no local bytes).",
+                ["OwnerLibraryNotFound"]   = "Owner library not found.",
+                ["ArtistLibraryNotFound"]  = "Artist library not found (slot may have been deleted).",
+                ["AccessRevoked"]          = "Access revoked — that slot is no longer shared with you.",
+                ["KindMismatch"]           = "Slot {0} was saved for a {1}; can't apply to a {2}.",
+
+                // --- Library / list views ---
+                ["LibraryEmpty"]           = "Your library is empty.",
+                ["LibraryEmptyHint"]       = "Library is empty. Paint a sign with /sil <url> and the URL will be auto-saved.",
+                ["NoBuyersOnSlot"]         = "Slot {0} (\"{1}\") has no buyers.",
+                ["NoSlotsShared"]          = "No slots are currently shared with anyone.",
+                ["NobodyHasShared"]        = "Nobody has shared art with you yet.",
+                ["SharedHeaderForSlot"]    = "<color=#ffff66>Slot {0}</color> (\"{1}\") shared with {2}:",
+                ["SharedRow"]              = "  <color=#7ad>{0}</color> — {1:yyyy-MM-dd}",
+                ["SharedSlotsHeader"]      = "<color=#ffff66>Shared slots ({0}):</color>",
+                ["SharedSlotsRow"]         = "  Slot <color=#ffff66>{0}</color> (\"{1}\") → <color=#7ad>{2}</color> buyer(s). Use /saveart shared {0} for names.",
+                ["SharedWithMeHeader"]     = "<color=#ffff66>Shared with you ({0}):</color>",
+                ["SharedWithMeRow"]        = "  <color=#7ad>{0}</color> — slot <color=#ffff66>{1}</color> \"{2}\" — <color=#aaaaaa>open /saveart → Shared tab to apply</color>",
+                ["ListHeader"]             = "Library — {0}/{1} slots, page {2}/{3}",
+                ["ListRow"]                = "  [{0}] <color=#ffff66>{1}</color> · {2}/tex{3} · {4} · {5}",
+
+                // --- Usage hints ---
+                ["SlotMustBePositive"]     = "Slot must be a positive integer.",
+                ["UsagePublish"]           = "Usage: /saveart publish <slot>  (toggles public/private)",
+                ["UsageShare"]             = "Usage: /saveart share <slot> <name|steamid>",
+                ["UsageUnshare"]           = "Usage: /saveart unshare <slot> <name|steamid>",
+                ["UsageApply"]             = "Usage: /saveart apply <slot>",
+                ["UsageRename"]            = "Usage: /saveart rename <slot> <new name>",
+                ["UsageRemove"]            = "Usage: /saveart remove <slot>",
+                ["UsageAdmin"]             = "Usage: /saveart admin <steamid> <list|apply|remove|rename|publish|unpublish> [args]",
+                ["AdminSubcommands"]       = "Subcommand: list | apply | rename | remove | publish | unpublish",
+
+                // --- Import URL flow ---
+                ["ImportLookAtFirst"]      = "Look at a sign, photo frame, or pumpkin first, then click Import URL.",
+                ["ImportSessionExpired"]   = "Import session expired — re-open the panel and click Import URL.",
+                ["ImportPasteHint"]        = "Click into the field, paste a URL, then press Enter.",
+                ["UrlEmpty"]               = "URL was empty.",
+                ["UrlBlockedAtImport"]     = "URL contains a blocked substring (auth token?).",
+                ["ImportTargetGone"]       = "Target sign is no longer there.",
+                ["KindEntityMismatch"]     = "Internal: kind/entity mismatch.",
+                ["KindEntityMismatchDispatch"] = "Internal: kind/entity mismatch on dispatch.",
+                ["ApplyFailedSignArtist"]  = "Apply failed — Sign Artist threw. Check server log.",
+                ["ImportApplied"]          = "Applied. To save it, aim at the sign and click Save Sign in the toolbar.",
+
+                // --- Toolbar fallbacks ---
+                ["NoSignAimSaveToolbar"]   = "No sign in your aim. Look at one and press USE within {0:0}s, or open /saveart again while aimed.",
+                ["WipeArmedToolbar"]       = "Click the red CONFIRM WIPE button within {0:0}s to delete ALL your saved art. This is irreversible.",
+                ["ConfirmWindowExpired"]   = "Confirm window expired — click Delete again.",
+
+                // --- Capture / save feedback ---
+                ["SavedAs"]                = "Saved as slot {0} (\"{1}\", {2}). /saveart to browse.",
+                ["AutoSavedAs"]            = "Auto-saved as slot {0} (\"{1}\", {2}). /saveart to browse.",
+                ["ImageTooLarge"]          = "Image too large ({0}KB > cap {1}KB). Not saved.",
+                ["DiscordCdnWithBytes"]    = "Discord CDN URLs expire in ~24h, but the bytes are saved locally and survive.",
+                ["DiscordCdnUrlOnly"]      = "Discord CDN URLs expire in ~24h. For wipe-survival host on imgur / GitHub raw / your own server.",
+
+                // --- Publish verb tokens ---
+                ["PublishVerbPublished"]   = "published",
+                ["PublishVerbUnpublished"] = "unpublished",
+                ["PublishOwnerNote"]       = " [{0}'s lib]",
+
+                // --- Share notify (recipient toast) ---
+                ["ShareNotify"]            = "<color=#55ff55>{0}</color> shared <color=#ffff66>{1}</color> with you. Open <color=#7ad>/saveart</color> → <color=#7ad>Shared with me</color> tab to apply.",
+                ["ShareNotifySlotFallback"] = "slot {0}",
+
+                // --- Preview modal ---
+                ["PreviewReadFail"]        = "Failed to read PNG: {0}",
+                ["PreviewEmpty"]           = "PNG file is empty.",
+                ["PreviewRegisterFail"]    = "Couldn't register preview image.",
+                ["PreviewRejected"]        = "Preview image rejected by FileStorage.",
+
+                // --- Admin debug raycast ---
+                ["NoEyeTransform"]         = "No eye transform (mid-respawn?).",
+                ["NoRaycastHit"]           = "No raycast hit within 16m.",
+                ["DebugRaycastHeader"]     = "<color=#ffff66>Raycast debug</color> (also written to Carbon log)\n  Distance: {0:0.00} m\n  Type:     <color=#7ad>{1}</color>\n  Prefab:   <color=#7ad>{2}</color>\n  ResolveKind: <color=#fc5>{3}</color>\n  EntityHasAnyArt: <color=#fc5>{4}</color>\n  {5}",
+
+                // --- Help body ---
+                ["HelpBody"]               = "<color=#ffff66>Sign Art Library commands:</color>\n" +
+                                             "  /saveart                          — open browse panel (My Library tab)\n" +
+                                             "  /saveart save [name]              — save the painted sign you're aiming at (byte-mode)\n" +
+                                             "  /saveart apply <slot>             — repaint the sign you're aiming at\n" +
+                                             "  /saveart rename <slot> <name>     — rename a slot\n" +
+                                             "  /saveart remove <slot>            — delete a slot (two-step)\n" +
+                                             "  /saveart wipe                     — wipe whole library (two-step)\n" +
+                                             "  /saveart publish <slot>           — toggle a slot public/private{0}\n" +
+                                             "  /saveart public [search]          — open Public Gallery (optional search by artist/name)\n" +
+                                             "  /saveart share <slot> <name>      — grant a specific buyer copy access (commission/sell)\n" +
+                                             "  /saveart unshare <slot> <name>    — revoke a buyer's access\n" +
+                                             "  /saveart shared [slot]            — list buyers on a slot, or all your shared slots\n" +
+                                             "  /saveart shared-with-me           — list slots other artists shared with you\n" +
+                                             "  /saveart list [page]              — chat list of own slots\n" +
+                                             "  Click <color=#7ad>View</color> on any row in the panel to preview the image before applying.{1}\n" +
+                                             "<color=#aaaaaa>Capture: /sil [url] via Sign Artist auto-captures URL + bytes; /saveart save reads bytes off any painted sign you own (vanilla painter or Sign Artist). Apply prefers bytes (no network hit) and auto-resizes to the target canvas via System.Drawing. Saved bytes live on the SERVER under SignArtSaver/images/[steamid]/[slot].png and survive wipes. Auto-capture is {2}.</color>",
+                ["HelpPublicCapNote"]      = " (cap: {0} public slots / player)",
+                ["HelpPublicCapNone"]      = " (no cap)",
+                ["HelpAdminBlock"]         = "\n<color=#ffcc55>Admin:</color>\n  /saveart admin <steamid> <list|apply|rename|remove|publish|unpublish> [args]\n  /saveart debug                    — raycast diagnostic (admin-only)",
+                ["HelpAutoCaptureOn"]      = "ON",
+                ["HelpAutoCaptureOff"]     = "OFF",
+
+                // --- Player-name resolver ---
+                ["ResolveNoInput"]         = "No name or steamid given.",
+                ["ResolveExactAmbiguous"]  = "Multiple players match exact name '{0}'. Use a steamid.",
+                ["ResolveNoOnlineMatch"]   = "No online player matched '{0}' (offline players need exact name or steamid).",
+                ["ResolveOnlineAmbiguous"] = "{0} online players match '{1}': {2} — be more specific or use a steamid.",
             }, this, "en");
         }
 
@@ -520,7 +613,7 @@ namespace Oxide.Plugins
             public string BytesSha1;   // sha1[0..10] of raw PNG bytes (byte-mode dedupe key)
             public long BytesSize;     // file size in bytes (display only)
             // Common fields.
-            public string EntityKind;  // KindSign | KindPhotoFrame | KindPumpkin | KindPaintedItem
+            public string EntityKind;  // KindSign | KindPhotoFrame | KindPumpkin
             public uint TextureIndex;
             public DateTime SavedUtc;
             // Original-canvas tracking (v0.3.0). Lets the artist see "this was drawn on a
@@ -564,7 +657,7 @@ namespace Oxide.Plugins
         {
             public ulong NetId;             // BaseNetworkable.net.ID.Value of the painted entity
             public ulong AppliedByUserId;   // who ran the apply (slot owner if self-applied; buyer if shared)
-            public string ApplyKind;        // KindSign | KindPhotoFrame | KindPumpkin | KindPaintedItem
+            public string ApplyKind;        // KindSign | KindPhotoFrame | KindPumpkin
             public uint TextureIndex;       // multi-texture signs use indices 0..3; photo frames/pumpkins always 0
             public DateTime AppliedUtc;
             public DateTime? LastVerifiedUtc;
@@ -737,7 +830,7 @@ namespace Oxide.Plugins
             steamId = 0;
             canonicalName = null;
             err = null;
-            if (string.IsNullOrWhiteSpace(nameOrId)) { err = "No name or steamid given."; return false; }
+            if (string.IsNullOrWhiteSpace(nameOrId)) { err = L("ResolveNoInput", caller); return false; }
             string s = nameOrId.Trim();
 
             // Steamid64 fast path.
@@ -788,7 +881,7 @@ namespace Oxide.Plugins
             if (exactCount == 1) { steamId = exactId; canonicalName = exactName; return true; }
             if (exactCount > 1)
             {
-                err = $"Multiple players match exact name '{s}'. Use a steamid.";
+                err = L("ResolveExactAmbiguous", caller, EscapeRich(s));
                 return false;
             }
 
@@ -804,8 +897,9 @@ namespace Oxide.Plugins
                 }
             }
             if (subCount == 1) { steamId = subId; canonicalName = subName; return true; }
-            if (subCount == 0) { err = $"No online player matched '{s}' (offline players need exact name or steamid)."; return false; }
-            err = $"{subCount} online players match '{s}': {string.Join(", ", examples)}{(subCount > examples.Count ? ", …" : "")} — be more specific or use a steamid.";
+            if (subCount == 0) { err = L("ResolveNoOnlineMatch", caller, EscapeRich(s)); return false; }
+            string egList = string.Join(", ", examples.Select(EscapeRich)) + (subCount > examples.Count ? ", …" : "");
+            err = L("ResolveOnlineAmbiguous", caller, subCount, EscapeRich(s), egList);
             return false;
         }
 
@@ -838,8 +932,8 @@ namespace Oxide.Plugins
                 return;
             shareNotifyCooldown[key] = DateTime.UtcNow;
             string artistName = EscapeRich(ResolveDisplayName(artistId));
-            string slotName = string.IsNullOrEmpty(art.Name) ? $"slot {art.Slot}" : $"\"{EscapeRich(art.Name)}\"";
-            p.ChatMessage(Tag() + $"<color=#55ff55>{artistName}</color> shared <color=#ffff66>{slotName}</color> with you. Open <color=#7ad>/saveart</color> → <color=#7ad>Shared with me</color> tab to apply.");
+            string slotName = string.IsNullOrEmpty(art.Name) ? L("ShareNotifySlotFallback", p, art.Slot) : $"\"{EscapeRich(art.Name)}\"";
+            p.ChatMessage(Tag() + L("ShareNotify", p, artistName, slotName));
         }
 
         #endregion
@@ -892,7 +986,7 @@ namespace Oxide.Plugins
         private class PendingImport
         {
             public BaseEntity Entity;
-            public string Kind;            // KindSign | KindPhotoFrame | KindPumpkin | KindPaintedItem
+            public string Kind;            // KindSign | KindPhotoFrame | KindPumpkin
             public uint TextureIndex;
             public DateTime ArmedUtc;
         }
@@ -931,6 +1025,12 @@ namespace Oxide.Plugins
         private bool _postLoadDone;
 
         private bool _unloading;
+
+        // Dynamic OnPlayerInput subscription (uMod guideline #17 — avoid hot hooks unless
+        // needed). OnPlayerInput fires every tick per player; we only need it while a
+        // pending save/apply/import is armed and waiting on the USE key. Subscribe on
+        // first arm, Unsubscribe when all three pending dictionaries are empty.
+        private bool _inputHookActive;
 
         #endregion
 
@@ -1100,6 +1200,11 @@ namespace Oxide.Plugins
             // Diagnostic periodic scan (v0.11.2). Off by default; opt in via config when
             // investigating a recurring blank-art trigger.
             StartSelfHealPeriodicScanIfEnabled();
+
+            // Default state: OnPlayerInput off. ArmInputHook() re-subscribes when a
+            // pending save/apply/import is armed; ReleaseInputHookIfIdle() drops it
+            // again when all three dictionaries empty out.
+            Unsubscribe(nameof(OnPlayerInput));
         }
 
         private void Unload()
@@ -1235,6 +1340,27 @@ namespace Oxide.Plugins
             });
         }
 
+        // Called after every assignment to awaitingApply/Save/Import. Idempotent.
+        private void ArmInputHook()
+        {
+            if (_inputHookActive || _unloading) return;
+            _inputHookActive = true;
+            Subscribe(nameof(OnPlayerInput));
+        }
+
+        // Called after every Remove from any of the three pending dictionaries. If
+        // none of them have any entries left, drops the OnPlayerInput subscription so
+        // the per-tick hook stops firing for every online player.
+        private void ReleaseInputHookIfIdle()
+        {
+            if (!_inputHookActive) return;
+            if (awaitingApply.Count == 0 && awaitingSave.Count == 0 && awaitingImport.Count == 0)
+            {
+                _inputHookActive = false;
+                Unsubscribe(nameof(OnPlayerInput));
+            }
+        }
+
         private void OnPlayerInput(BasePlayer player, InputState input)
         {
             try { OnPlayerInputImpl(player, input); }
@@ -1253,11 +1379,11 @@ namespace Oxide.Plugins
             {
                 if ((DateTime.UtcNow - pendingSave.ArmedUtc).TotalSeconds > config.PendingApplyTimeoutSeconds)
                 {
-                    awaitingSave.Remove(player.userID);
+                    awaitingSave.Remove(player.userID); ReleaseInputHookIfIdle();
                     player.ChatMessage(Tag() + Warn(L("SaveTimedOut", player)));
                     return;
                 }
-                awaitingSave.Remove(player.userID);
+                awaitingSave.Remove(player.userID); ReleaseInputHookIfIdle();
 
                 if (!TryRaycastSign(player, out var sEntity, out var sKind, out var sTexIdx))
                 {
@@ -1283,7 +1409,7 @@ namespace Oxide.Plugins
 
             if ((DateTime.UtcNow - pending.ArmedUtc).TotalSeconds > config.PendingApplyTimeoutSeconds)
             {
-                awaitingApply.Remove(player.userID);
+                awaitingApply.Remove(player.userID); ReleaseInputHookIfIdle();
                 player.ChatMessage(Tag() + Warn(L("ApplyTimedOut", player)));
                 return;
             }
@@ -1295,12 +1421,12 @@ namespace Oxide.Plugins
             var art = lib?.Slots.FirstOrDefault(s => s.Slot == pending.Slot);
             if (art == null)
             {
-                awaitingApply.Remove(player.userID);
-                player.ChatMessage(Tag() + Err($"Slot {pending.Slot} no longer exists."));
+                awaitingApply.Remove(player.userID); ReleaseInputHookIfIdle();
+                player.ChatMessage(Tag() + Err(L("SlotNoLongerExists", player, pending.Slot)));
                 return;
             }
 
-            awaitingApply.Remove(player.userID);
+            awaitingApply.Remove(player.userID); ReleaseInputHookIfIdle();
             ApplyArtToEntity(player, entity, kind, art, libUserId);
         }
 
@@ -1314,9 +1440,9 @@ namespace Oxide.Plugins
                     ClosePreview(player, panel, refreshPanel: false);
                 DestroyAllUi(player);
                 openPanels.Remove(player.userID);
-                awaitingApply.Remove(player.userID);
-                awaitingSave.Remove(player.userID);
-                awaitingImport.Remove(player.userID);
+                awaitingApply.Remove(player.userID); ReleaseInputHookIfIdle();
+                awaitingSave.Remove(player.userID); ReleaseInputHookIfIdle();
+                awaitingImport.Remove(player.userID); ReleaseInputHookIfIdle();
                 skipNextCapture.Remove(player.userID);
                 applyCooldown.Remove(player.userID);
                 wipeArmedUtc.Remove(player.userID);
@@ -1429,7 +1555,7 @@ namespace Oxide.Plugins
             if (bytes != null && bytes.Length > config.MaxBytesPerSlot)
             {
                 if (caller != null && caller.IsConnected)
-                    caller.ChatMessage(Tag() + Warn($"Image too large ({bytes.Length / 1024}KB > cap {config.MaxBytesPerSlot / 1024}KB). Not saved."));
+                    caller.ChatMessage(Tag() + Warn(L("ImageTooLarge", caller, bytes.Length / 1024, config.MaxBytesPerSlot / 1024)));
                 else
                     PrintWarning($"[slot capture] Refused {bytes.Length / 1024}KB payload — exceeds MaxBytesPerSlot ({config.MaxBytesPerSlot / 1024}KB).");
                 return null;
@@ -1511,13 +1637,10 @@ namespace Oxide.Plugins
 
             if (caller != null && caller.IsConnected)
             {
-                string label = autoCaptured ? "Auto-saved" : "Saved";
-                caller.ChatMessage(Tag() + Ok($"{label} as slot {slot} (\"{name}\", {kind}). /saveart to browse."));
+                caller.ChatMessage(Tag() + Ok(L(autoCaptured ? "AutoSavedAs" : "SavedAs", caller, slot, EscapeRich(name), kind)));
                 if (config.WarnOnDiscordCdn && !string.IsNullOrEmpty(url) && IsDiscordCdn(url))
                 {
-                    string note = bytesHash != null
-                        ? "Discord CDN URLs expire in ~24h, but the bytes are saved locally and survive."
-                        : "Discord CDN URLs expire in ~24h. For wipe-survival host on imgur / GitHub raw / your own server.";
+                    string note = L(bytesHash != null ? "DiscordCdnWithBytes" : "DiscordCdnUrlOnly", caller);
                     caller.ChatMessage(Tag() + Warn(note));
                 }
             }
@@ -1544,7 +1667,7 @@ namespace Oxide.Plugins
 
             if (config.StrictKindMatch && art.EntityKind != targetKind)
             {
-                caller.ChatMessage(Tag() + Err($"Slot {art.Slot} was saved for a {art.EntityKind}; can't apply to a {targetKind}."));
+                caller.ChatMessage(Tag() + Err(L("KindMismatch", caller, art.Slot, art.EntityKind, targetKind)));
                 return;
             }
 
@@ -1656,24 +1779,16 @@ namespace Oxide.Plugins
                     SignArtist.Call("API_SkinPhotoFrame", caller, frame, art.Url, art.Raw);
                 else if (targetKind == KindPumpkin && entity is CarvablePumpkin pumpkin)
                     SignArtist.Call("API_SkinPumpkin", caller, pumpkin, art.Url, art.Raw);
-                else if (targetKind == KindPaintedItem)
-                {
-                    // Sign Artist v1.4.6 has no API_Skin* for PaintedItemStorageEntity. Byte-mode
-                    // (the path above this fallback) handles it — but a URL-only slot has no
-                    // local bytes to use. Tell the player to re-save once with bytes.
-                    caller.ChatMessage(Tag() + Err($"Slot {art.Slot} is URL-only; PaintedItem entities (drawable windows etc.) need a byte-mode save. /saveart save while looking at the painted entity."));
-                    return;
-                }
                 else
                 {
-                    caller.ChatMessage(Tag() + Err("Internal: kind/entity mismatch on dispatch."));
+                    caller.ChatMessage(Tag() + Err(L("KindEntityMismatchDispatch", caller)));
                     return;
                 }
             }
             catch (Exception e)
             {
                 PrintWarning($"Apply via Sign Artist threw: {e.Message}");
-                caller.ChatMessage(Tag() + Err("Apply failed — Sign Artist threw. Check server log."));
+                caller.ChatMessage(Tag() + Err(L("ApplyFailedSignArtist", caller)));
                 return;
             }
 
@@ -1706,14 +1821,6 @@ namespace Oxide.Plugins
                     if (pumpkin.textureIDs == null) return 0;
                     if (textureIndex >= pumpkin.textureIDs.Length) return 0;
                     return pumpkin.textureIDs[textureIndex];
-                }
-                if (kind == KindPaintedItem && entity is PaintedItemStorageEntity painted)
-                {
-                    // Public IUGCBrowserEntity.GetContentCRCs is robust against private field
-                    // renames — prefer it over reflection here. Returns a single-element array
-                    // for this entity class.
-                    var crcs = painted.GetContentCRCs;
-                    return (crcs != null && crcs.Length > 0) ? crcs[0] : 0u;
                 }
             }
             catch { }
@@ -2152,18 +2259,18 @@ namespace Oxide.Plugins
         private void SubDebug(BasePlayer player)
         {
             if (!HasAdmin(player)) { SubHelp(player); return; }
-            if (player.eyes == null) { player.ChatMessage(Tag() + Err("No eye transform (mid-respawn?).")); return; }
+            if (player.eyes == null) { player.ChatMessage(Tag() + Err(L("NoEyeTransform", player))); return; }
             var ray = player.eyes.HeadRay();
             bool hit = Physics.Raycast(ray, out var info, 16f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
             if (!hit)
             {
-                player.ChatMessage(Tag() + Warn("No raycast hit within 16m."));
+                player.ChatMessage(Tag() + Warn(L("NoRaycastHit", player)));
                 return;
             }
             var ent = info.GetEntity() ?? info.collider?.GetComponentInParent<BaseEntity>();
             string entType = ent != null ? ent.GetType().Name : "(null)";
             string entPrefab = ent != null ? (ent.ShortPrefabName ?? "?") : "?";
-            string kindResolve = ent != null ? (ResolveKind(ent) ?? "(unrecognized — not Signage/PhotoFrame/CarvablePumpkin/PaintedItemStorageEntity)") : "n/a";
+            string kindResolve = ent != null ? (ResolveKind(ent) ?? "(unrecognized — not Signage/PhotoFrame/CarvablePumpkin)") : "n/a";
             bool hasArt = ent != null && EntityHasAnyArt(ent);
             // Detail per entity kind.
             string crcDetail = "";
@@ -2185,13 +2292,7 @@ namespace Oxide.Plugins
             }
 
             player.ChatMessage(
-                Tag() + "<color=#ffff66>Raycast debug</color> (also written to Carbon log)\n" +
-                $"  Distance: {info.distance:0.00} m\n" +
-                $"  Type:     <color=#7ad>{entType}</color>\n" +
-                $"  Prefab:   <color=#7ad>{entPrefab}</color>\n" +
-                $"  ResolveKind: <color=#fc5>{kindResolve}</color>\n" +
-                $"  EntityHasAnyArt: <color=#fc5>{hasArt}</color>\n" +
-                $"  {crcDetail}");
+                Tag() + L("DebugRaycastHeader", player, info.distance, entType, entPrefab, kindResolve, hasArt, crcDetail));
 
             // Also write to Carbon log so the operator can read it via SSH — chat has
             // no copy/paste in-game. Tagged DEBUG so it's easy to grep.
@@ -2209,7 +2310,7 @@ namespace Oxide.Plugins
         {
             if (args.Length < 2 || !int.TryParse(args[1], out var slot))
             {
-                player.ChatMessage(Tag() + Err("Usage: /saveart publish <slot>  (toggles public/private)"));
+                player.ChatMessage(Tag() + Err(L("UsagePublish", player)));
                 return;
             }
             ulong target = libUserId == 0 ? (ulong)player.userID : libUserId;
@@ -2241,9 +2342,9 @@ namespace Oxide.Plugins
             art.IsPublic = !art.IsPublic;
             art.PublishedUtc = art.IsPublic ? DateTime.UtcNow : (DateTime?)null;
             StampLib(lib);
-            string verb = art.IsPublic ? "published" : "unpublished";
+            string verb = L(art.IsPublic ? "PublishVerbPublished" : "PublishVerbUnpublished", player);
             string color = art.IsPublic ? "#55ff55" : "#ffcc55";
-            string ownerNote = libUserId != 0 ? $" [{ResolveDisplayName(libUserId)}'s lib]" : "";
+            string ownerNote = libUserId != 0 ? L("PublishOwnerNote", player, ResolveDisplayName(libUserId)) : "";
             player.ChatMessage(Tag() + $"<color={color}>{L("SlotPublishedTpl", player, slot, EscapeRich(art.Name), verb, ownerNote)}</color>");
             // If panel is open, refresh so the row reflects the new state.
             if (openPanels.ContainsKey(player.userID)) RefreshBrowsePanel(player);
@@ -2257,16 +2358,16 @@ namespace Oxide.Plugins
         {
             if (args.Length < 3)
             {
-                player.ChatMessage(Tag() + Err("Usage: /saveart share <slot> <name|steamid>"));
+                player.ChatMessage(Tag() + Err(L("UsageShare", player)));
                 return;
             }
             if (!int.TryParse(args[1], out var slot) || slot < 1)
             {
-                player.ChatMessage(Tag() + Err("Slot must be a positive integer.")); return;
+                player.ChatMessage(Tag() + Err(L("SlotMustBePositive", player))); return;
             }
             var lib = store.Players.TryGetValue((ulong)player.userID, out var l) ? l : null;
             var art = lib?.Slots.FirstOrDefault(s => s.Slot == slot);
-            if (art == null) { player.ChatMessage(Tag() + Err($"No such slot ({slot}) in your library.")); return; }
+            if (art == null) { player.ChatMessage(Tag() + Err(L("SlotNotInLibrary", player, slot))); return; }
             if (string.IsNullOrEmpty(art.BytesPath))
             {
                 player.ChatMessage(Tag() + Err(L("UrlOnlyCantShare", player, slot)));
@@ -2307,16 +2408,16 @@ namespace Oxide.Plugins
         {
             if (args.Length < 3)
             {
-                player.ChatMessage(Tag() + Err("Usage: /saveart unshare <slot> <name|steamid>"));
+                player.ChatMessage(Tag() + Err(L("UsageUnshare", player)));
                 return;
             }
             if (!int.TryParse(args[1], out var slot) || slot < 1)
             {
-                player.ChatMessage(Tag() + Err("Slot must be a positive integer.")); return;
+                player.ChatMessage(Tag() + Err(L("SlotMustBePositive", player))); return;
             }
             var lib = store.Players.TryGetValue((ulong)player.userID, out var l) ? l : null;
             var art = lib?.Slots.FirstOrDefault(s => s.Slot == slot);
-            if (art == null) { player.ChatMessage(Tag() + Err($"No such slot ({slot}) in your library.")); return; }
+            if (art == null) { player.ChatMessage(Tag() + Err(L("SlotNotInLibrary", player, slot))); return; }
             if (art.SharedWith == null || art.SharedWith.Count == 0)
             {
                 player.ChatMessage(Tag() + Warn(L("UnshareEmpty", player, slot))); return;
@@ -2347,7 +2448,7 @@ namespace Oxide.Plugins
             var lib = store.Players.TryGetValue((ulong)player.userID, out var l) ? l : null;
             if (lib == null || lib.Slots == null || lib.Slots.Count == 0)
             {
-                player.ChatMessage(Tag() + Warn("Your library is empty.")); return;
+                player.ChatMessage(Tag() + Warn(L("LibraryEmpty", player))); return;
             }
             if (args.Length >= 2 && int.TryParse(args[1], out var slot))
             {
@@ -2355,14 +2456,14 @@ namespace Oxide.Plugins
                 if (art == null) { player.ChatMessage(Tag() + Err(L("SlotNotFound", player, slot))); return; }
                 if (art.SharedWith == null || art.SharedWith.Count == 0)
                 {
-                    player.ChatMessage(Tag() + $"Slot {slot} (\"{art.Name}\") has no buyers."); return;
+                    player.ChatMessage(Tag() + L("NoBuyersOnSlot", player, slot, EscapeRich(art.Name))); return;
                 }
                 var sb = new StringBuilder();
-                sb.AppendLine(Tag() + $"<color=#ffff66>Slot {slot}</color> (\"{art.Name}\") shared with {art.SharedWith.Count}:");
+                sb.AppendLine(Tag() + L("SharedHeaderForSlot", player, slot, EscapeRich(art.Name), art.SharedWith.Count));
                 foreach (var s in art.SharedWith.OrderBy(x => x.SharedUtc))
                 {
                     string display = EscapeRich(ResolveDisplayName(s.SteamId));
-                    sb.AppendLine($"  <color=#7ad>{display}</color> — {s.SharedUtc:yyyy-MM-dd}");
+                    sb.AppendLine(L("SharedRow", player, display, s.SharedUtc));
                 }
                 player.ChatMessage(sb.ToString());
                 return;
@@ -2371,13 +2472,13 @@ namespace Oxide.Plugins
             var rows = lib.Slots.Where(s => s.SharedWith != null && s.SharedWith.Count > 0).OrderBy(s => s.Slot).ToList();
             if (rows.Count == 0)
             {
-                player.ChatMessage(Tag() + "No slots are currently shared with anyone."); return;
+                player.ChatMessage(Tag() + L("NoSlotsShared", player)); return;
             }
             var sb2 = new StringBuilder();
-            sb2.AppendLine(Tag() + $"<color=#ffff66>Shared slots ({rows.Count}):</color>");
+            sb2.AppendLine(Tag() + L("SharedSlotsHeader", player, rows.Count));
             foreach (var a in rows)
             {
-                sb2.AppendLine($"  Slot <color=#ffff66>{a.Slot}</color> (\"{a.Name}\") → <color=#7ad>{a.SharedWith.Count}</color> buyer(s). Use /saveart shared {a.Slot} for names.");
+                sb2.AppendLine(L("SharedSlotsRow", player, a.Slot, EscapeRich(a.Name), a.SharedWith.Count));
             }
             player.ChatMessage(sb2.ToString());
         }
@@ -2399,7 +2500,7 @@ namespace Oxide.Plugins
             }
             if (rows.Count == 0)
             {
-                player.ChatMessage(Tag() + "Nobody has shared art with you yet."); return;
+                player.ChatMessage(Tag() + L("NobodyHasShared", player)); return;
             }
             // Newest first so fresh commissions show at top.
             rows.Sort((x, y) =>
@@ -2409,11 +2510,11 @@ namespace Oxide.Plugins
                 return yt.CompareTo(xt);
             });
             var sb = new StringBuilder();
-            sb.AppendLine(Tag() + $"<color=#ffff66>Shared with you ({rows.Count}):</color>");
+            sb.AppendLine(Tag() + L("SharedWithMeHeader", player, rows.Count));
             foreach (var r in rows)
             {
                 string artist = EscapeRich(ResolveDisplayName(r.artistId));
-                sb.AppendLine($"  <color=#7ad>{artist}</color> — slot <color=#ffff66>{r.art.Slot}</color> \"{EscapeRich(r.art.Name)}\" — <color=#aaaaaa>open /saveart → Shared tab to apply</color>");
+                sb.AppendLine(L("SharedWithMeRow", player, artist, r.art.Slot, EscapeRich(r.art.Name)));
             }
             player.ChatMessage(sb.ToString());
         }
@@ -2467,7 +2568,7 @@ namespace Oxide.Plugins
         {
             if (args.Length < 2 || !int.TryParse(args[1], out var slot))
             {
-                player.ChatMessage(Tag() + Err("Usage: /saveart apply <slot>"));
+                player.ChatMessage(Tag() + Err(L("UsageApply", player)));
                 return;
             }
             ulong target = libUserId == 0 ? (ulong)player.userID : libUserId;
@@ -2488,6 +2589,7 @@ namespace Oxide.Plugins
                 ArmedUtc = DateTime.UtcNow,
                 TargetUserId = libUserId,
             };
+            ArmInputHook();
             player.ChatMessage(Tag() + Ok(L("SlotArmed", player, slot, config.PendingApplyTimeoutSeconds)));
         }
 
@@ -2496,7 +2598,7 @@ namespace Oxide.Plugins
             ulong target = libUserId == 0 ? (ulong)player.userID : libUserId;
             var lib = store.Players.TryGetValue(target, out var l) ? l : null;
             int count = lib?.Slots?.Count ?? 0;
-            if (count == 0) { player.ChatMessage(Tag() + "Library is empty. Paint a sign with /sil <url> and the URL will be auto-saved."); return; }
+            if (count == 0) { player.ChatMessage(Tag() + L("LibraryEmptyHint", player)); return; }
 
             int page = 1;
             if (args.Length >= 2 && int.TryParse(args[1], out var p) && p >= 1) page = p;
@@ -2505,10 +2607,10 @@ namespace Oxide.Plugins
             if (page > totalPages) page = totalPages;
 
             var sb = new StringBuilder();
-            sb.AppendLine(Tag() + $"Library — {count}/{config.SlotsPerPlayer} slots, page {page}/{totalPages}");
+            sb.AppendLine(Tag() + L("ListHeader", player, count, config.SlotsPerPlayer, page, totalPages));
             foreach (var art in lib.Slots.OrderBy(s => s.Slot).Skip((page - 1) * pageSize).Take(pageSize))
             {
-                sb.AppendLine($"  [{art.Slot}] <color=#ffff66>{art.Name}</color> · {art.EntityKind}/tex{art.TextureIndex} · {FormatAge(art.SavedUtc)} · {Truncate(art.Url, config.UrlDisplayLen)}");
+                sb.AppendLine(L("ListRow", player, art.Slot, EscapeRich(art.Name), art.EntityKind, art.TextureIndex, FormatAge(art.SavedUtc), Truncate(art.Url, config.UrlDisplayLen)));
             }
             player.ChatMessage(sb.ToString().TrimEnd());
         }
@@ -2517,7 +2619,7 @@ namespace Oxide.Plugins
         {
             if (args.Length < 3 || !int.TryParse(args[1], out var slot))
             {
-                player.ChatMessage(Tag() + Err("Usage: /saveart rename <slot> <new name>"));
+                player.ChatMessage(Tag() + Err(L("UsageRename", player)));
                 return;
             }
             string newName = SanitizeSlotName(string.Join(" ", args.Skip(2)));
@@ -2539,7 +2641,7 @@ namespace Oxide.Plugins
         {
             if (args.Length < 2 || !int.TryParse(args[1], out var slot))
             {
-                player.ChatMessage(Tag() + Err("Usage: /saveart remove <slot>"));
+                player.ChatMessage(Tag() + Err(L("UsageRemove", player)));
                 return;
             }
             ulong target = libUserId == 0 ? (ulong)player.userID : libUserId;
@@ -2605,38 +2707,17 @@ namespace Oxide.Plugins
         private void SubHelp(BasePlayer player)
         {
             string publicCapNote = config.MaxPublicSlotsPerPlayer > 0
-                ? $" (cap: {config.MaxPublicSlotsPerPlayer} public slots / player)"
-                : " (no cap)";
-            string adminBlock = HasAdmin(player)
-                ? "\n<color=#ffcc55>Admin:</color>\n" +
-                  "  /saveart admin <steamid> <list|apply|rename|remove|publish|unpublish> [args]\n" +
-                  "  /saveart debug                    — raycast diagnostic (admin-only)"
-                : "";
-            player.ChatMessage(
-                Tag() + "<color=#ffff66>Sign Art Library commands:</color>\n" +
-                "  /saveart                          — open browse panel (My Library tab)\n" +
-                "  /saveart save [name]              — save the painted sign you're aiming at (byte-mode)\n" +
-                "  /saveart apply <slot>             — repaint the sign you're aiming at\n" +
-                "  /saveart rename <slot> <name>     — rename a slot\n" +
-                "  /saveart remove <slot>            — delete a slot (two-step)\n" +
-                "  /saveart wipe                     — wipe whole library (two-step)\n" +
-                $"  /saveart publish <slot>           — toggle a slot public/private{publicCapNote}\n" +
-                "  /saveart public [search]          — open Public Gallery (optional search by artist/name)\n" +
-                "  /saveart share <slot> <name>      — grant a specific buyer copy access (commission/sell)\n" +
-                "  /saveart unshare <slot> <name>    — revoke a buyer's access\n" +
-                "  /saveart shared [slot]            — list buyers on a slot, or all your shared slots\n" +
-                "  /saveart shared-with-me           — list slots other artists shared with you\n" +
-                "  /saveart list [page]              — chat list of own slots\n" +
-                "  Click <color=#7ad>View</color> on any row in the panel to preview the image before applying." +
-                adminBlock + "\n" +
-                $"<color=#aaaaaa>Capture: /sil [url] via Sign Artist auto-captures URL + bytes; /saveart save reads bytes off any painted sign you own (vanilla painter or Sign Artist). Apply prefers bytes (no network hit) and auto-resizes to the target canvas via System.Drawing. Saved bytes live on the SERVER under SignArtSaver/images/[steamid]/[slot].png and survive wipes. Auto-capture is {(config.AutoCapture ? "ON" : "OFF")}.</color>"
-            );
+                ? L("HelpPublicCapNote", player, config.MaxPublicSlotsPerPlayer)
+                : L("HelpPublicCapNone", player);
+            string adminBlock = HasAdmin(player) ? L("HelpAdminBlock", player) : "";
+            string autoStatus = L(config.AutoCapture ? "HelpAutoCaptureOn" : "HelpAutoCaptureOff", player);
+            player.ChatMessage(Tag() + L("HelpBody", player, publicCapNote, adminBlock, autoStatus));
         }
 
         private void SubAdmin(BasePlayer player, string[] args)
         {
             if (!HasAdmin(player)) { player.ChatMessage(Tag() + Err(L("AdminOnly", player))); return; }
-            if (args.Length < 3) { player.ChatMessage(Tag() + Err("Usage: /saveart admin <steamid> <list|apply|remove|rename|publish|unpublish> [args]")); return; }
+            if (args.Length < 3) { player.ChatMessage(Tag() + Err(L("UsageAdmin", player))); return; }
             if (!ulong.TryParse(args[1], out var target) || !target.IsSteamId())
             {
                 player.ChatMessage(Tag() + Err(L("BadSteamId", player)));
@@ -2657,7 +2738,7 @@ namespace Oxide.Plugins
                 case "delete":    SubRemove(player, rest, target);  break;
                 case "publish":
                 case "unpublish": SubPublish(player, rest, target); break;
-                default: player.ChatMessage(Tag() + Err("Subcommand: list | apply | rename | remove | publish | unpublish")); break;
+                default: player.ChatMessage(Tag() + Err(L("AdminSubcommands", player))); break;
             }
         }
 
@@ -2701,7 +2782,7 @@ namespace Oxide.Plugins
             ulong target = panel.AdminTargetId != 0 ? panel.AdminTargetId : (ulong)player.userID;
             var lib = store.Players.TryGetValue(target, out var l) ? l : null;
             var art = lib?.Slots.FirstOrDefault(s => s.Slot == slot);
-            if (art == null) { player.ChatMessage(Tag() + Err($"Slot {slot} no longer exists.")); return; }
+            if (art == null) { player.ChatMessage(Tag() + Err(L("SlotNoLongerExists", player, slot))); return; }
 
             // Close panel so the player can aim at the sign without the CUI in the way.
             DestroyAllUi(player);
@@ -2719,6 +2800,7 @@ namespace Oxide.Plugins
                 ArmedUtc = DateTime.UtcNow,
                 TargetUserId = panel.AdminTargetId,
             };
+            ArmInputHook();
             player.ChatMessage(Tag() + Ok(L("SlotArmed", player, slot, config.PendingApplyTimeoutSeconds)));
         }
 
@@ -2747,7 +2829,7 @@ namespace Oxide.Plugins
             if (!openPanels.TryGetValue(player.userID, out var panel)) return;
 
             // Cancel any prior apply arming so the two flows can't tangle.
-            awaitingApply.Remove(player.userID);
+            awaitingApply.Remove(player.userID); ReleaseInputHookIfIdle();
 
             // Tear down panel + preview so the cursor releases and the head ray is unblocked.
             ClosePreview(player, panel, refreshPanel: false);
@@ -2773,7 +2855,8 @@ namespace Oxide.Plugins
 
             // No target — arm the USE-key fallback so the player can aim and press USE.
             awaitingSave[player.userID] = new PendingSave { ArmedUtc = DateTime.UtcNow };
-            player.ChatMessage(Tag() + Warn($"No sign in your aim. Look at one and press USE within {config.PendingApplyTimeoutSeconds:0}s, or open /saveart again while aimed."));
+            ArmInputHook();
+            player.ChatMessage(Tag() + Warn(L("NoSignAimSaveToolbar", player, config.PendingApplyTimeoutSeconds)));
         }
 
         // Toolbar: open the help modal. Read-only; closes via its own X or by reopening
@@ -2808,7 +2891,7 @@ namespace Oxide.Plugins
 
             if (!TryRaycastSign(player, out var entity, out var kind, out var texIdx))
             {
-                player.ChatMessage(Tag() + Err("Look at a sign, photo frame, or pumpkin first, then click Import URL."));
+                player.ChatMessage(Tag() + Err(L("ImportLookAtFirst", player)));
                 return;
             }
             if (config.RequireOwnerSave && entity.OwnerID != player.userID && !HasAdmin(player))
@@ -2824,6 +2907,7 @@ namespace Oxide.Plugins
                 TextureIndex = texIdx,
                 ArmedUtc = DateTime.UtcNow,
             };
+            ArmInputHook();
 
             // Tear down the main panel so the import modal is on a clean screen — same
             // pattern as the preview modal. RefreshBrowsePanel rebuilds on close.
@@ -2839,7 +2923,7 @@ namespace Oxide.Plugins
             var player = arg?.Player();
             if (player == null) return;
             CuiHelper.DestroyUi(player, UiImportModal);
-            awaitingImport.Remove(player.userID);
+            awaitingImport.Remove(player.userID); ReleaseInputHookIfIdle();
             // Restore the main panel.
             if (openPanels.ContainsKey(player.userID)) RefreshBrowsePanel(player);
         }
@@ -2858,7 +2942,7 @@ namespace Oxide.Plugins
             if (player == null || !HasUse(player)) return;
             if (!awaitingImport.TryGetValue(player.userID, out var pending))
             {
-                player.ChatMessage(Tag() + Err("Import session expired — re-open the panel and click Import URL."));
+                player.ChatMessage(Tag() + Err(L("ImportSessionExpired", player)));
                 return;
             }
             // CuiInputField appends typed text after Command; arg.Args is the typed URL.
@@ -2868,7 +2952,7 @@ namespace Oxide.Plugins
             // and treat it as empty.
             if (url.Equals(ImportPlaceholder, StringComparison.OrdinalIgnoreCase))
             {
-                player.ChatMessage(Tag() + Err("Click into the field, paste a URL, then press Enter."));
+                player.ChatMessage(Tag() + Err(L("ImportPasteHint", player)));
                 return;
             }
             // Sometimes player types alongside the placeholder text; strip a leading copy
@@ -2877,12 +2961,12 @@ namespace Oxide.Plugins
                 url = url.Substring(ImportPlaceholder.Length).TrimStart();
             if (string.IsNullOrEmpty(url))
             {
-                player.ChatMessage(Tag() + Err("URL was empty."));
+                player.ChatMessage(Tag() + Err(L("UrlEmpty", player)));
                 return;
             }
             if (UrlIsBlocked(url))
             {
-                player.ChatMessage(Tag() + Err("URL contains a blocked substring (auth token?)."));
+                player.ChatMessage(Tag() + Err(L("UrlBlockedAtImport", player)));
                 return;
             }
             // Strip enclosing quotes if the player wrapped the URL.
@@ -2890,13 +2974,13 @@ namespace Oxide.Plugins
 
             if (pending.Entity == null || pending.Entity.IsDestroyed)
             {
-                player.ChatMessage(Tag() + Err("Target sign is no longer there."));
-                awaitingImport.Remove(player.userID);
+                player.ChatMessage(Tag() + Err(L("ImportTargetGone", player)));
+                awaitingImport.Remove(player.userID); ReleaseInputHookIfIdle();
                 return;
             }
             if (SignArtist == null)
             {
-                player.ChatMessage(Tag() + Err("Sign Artist plugin offline."));
+                player.ChatMessage(Tag() + Err(L("SignArtistOffline", player)));
                 return;
             }
 
@@ -2913,19 +2997,10 @@ namespace Oxide.Plugins
                     SignArtist.Call("API_SkinPhotoFrame", player, frame, url, false);
                 else if (pending.Kind == KindPumpkin && pending.Entity is CarvablePumpkin pumpkin)
                     SignArtist.Call("API_SkinPumpkin", player, pumpkin, url, false);
-                else if (pending.Kind == KindPaintedItem)
-                {
-                    // Sign Artist v1.4.6 has no API_Skin* for PaintedItemStorageEntity. URL
-                    // import via Sign Artist is not possible for these entities; the user
-                    // must paint via the vanilla in-game UI first and then /saveart save.
-                    skipNextCapture.Remove((ulong)player.userID);
-                    player.ChatMessage(Tag() + Err("Sign Artist doesn't support drawable windows / paintable targets — paint with the vanilla UI, then Save Sign."));
-                    return;
-                }
                 else
                 {
                     skipNextCapture.Remove((ulong)player.userID);
-                    player.ChatMessage(Tag() + Err("Internal: kind/entity mismatch."));
+                    player.ChatMessage(Tag() + Err(L("KindEntityMismatch", player)));
                     return;
                 }
             }
@@ -2933,14 +3008,14 @@ namespace Oxide.Plugins
             {
                 skipNextCapture.Remove((ulong)player.userID);
                 PrintWarning($"Import URL via Sign Artist threw: {e.Message}");
-                player.ChatMessage(Tag() + Err("Apply failed — Sign Artist threw. Check server log."));
+                player.ChatMessage(Tag() + Err(L("ApplyFailedSignArtist", player)));
                 return;
             }
 
-            awaitingImport.Remove(player.userID);
+            awaitingImport.Remove(player.userID); ReleaseInputHookIfIdle();
             CuiHelper.DestroyUi(player, UiImportModal);
 
-            player.ChatMessage(Tag() + Ok("Applied. To save it, aim at the sign and click Save Sign in the toolbar."));
+            player.ChatMessage(Tag() + Ok(L("ImportApplied", player)));
 
             // Bring the main panel back so the user can keep working.
             if (openPanels.ContainsKey(player.userID)) RefreshBrowsePanel(player);
@@ -2954,7 +3029,7 @@ namespace Oxide.Plugins
             var player = arg?.Player();
             if (player == null || !HasUse(player)) return;
             wipeArmedUtc[player.userID] = DateTime.UtcNow;
-            player.ChatMessage(Tag() + Warn($"Click the red CONFIRM WIPE button within {config.WipeConfirmSeconds:0}s to delete ALL your saved art. This is irreversible."));
+            player.ChatMessage(Tag() + Warn(L("WipeArmedToolbar", player, config.WipeConfirmSeconds)));
             if (openPanels.ContainsKey(player.userID)) RefreshBrowsePanel(player);
         }
 
@@ -2982,13 +3057,13 @@ namespace Oxide.Plugins
 
             if (!store.Players.TryGetValue(ownerId, out var lib))
             {
-                player.ChatMessage(Tag() + Err("Owner library not found."));
+                player.ChatMessage(Tag() + Err(L("OwnerLibraryNotFound", player)));
                 return;
             }
             var art = lib.Slots.FirstOrDefault(s => s.Slot == slot && s.IsPublic);
             if (art == null)
             {
-                player.ChatMessage(Tag() + Err($"Public slot {slot} not found (or unpublished)."));
+                player.ChatMessage(Tag() + Err(L("SlotNotPublic", player, slot)));
                 return;
             }
             ApplyArtCrossPlayerArm(player, art, ownerId, slot);
@@ -3008,18 +3083,18 @@ namespace Oxide.Plugins
 
             if (!store.Players.TryGetValue(ownerId, out var lib))
             {
-                player.ChatMessage(Tag() + Err("Artist library not found (slot may have been deleted)."));
+                player.ChatMessage(Tag() + Err(L("ArtistLibraryNotFound", player)));
                 return;
             }
             var art = lib.Slots.FirstOrDefault(s => s.Slot == slot);
             if (art == null)
             {
-                player.ChatMessage(Tag() + Err($"Slot {slot} no longer exists in {ResolveDisplayName(ownerId)}'s library."));
+                player.ChatMessage(Tag() + Err(L("SlotMissingInOwnerLib", player, slot, EscapeRich(ResolveDisplayName(ownerId)))));
                 return;
             }
             if (!CanAccessSlot(art, ownerId, (ulong)player.userID, player))
             {
-                player.ChatMessage(Tag() + Err("Access revoked — that slot is no longer shared with you."));
+                player.ChatMessage(Tag() + Err(L("AccessRevoked", player)));
                 return;
             }
             ApplyArtCrossPlayerArm(player, art, ownerId, slot);
@@ -3047,6 +3122,7 @@ namespace Oxide.Plugins
                 ArmedUtc = DateTime.UtcNow,
                 TargetUserId = ownerId,
             };
+            ArmInputHook();
             player.ChatMessage(Tag() + Ok(L("SlotArmedNamed", player, slot, EscapeRich(art.Name), config.PendingApplyTimeoutSeconds)));
         }
 
@@ -3066,20 +3142,20 @@ namespace Oxide.Plugins
 
             if (!store.Players.TryGetValue(ownerId, out var lib))
             {
-                player.ChatMessage(Tag() + Err("Owner library not found."));
+                player.ChatMessage(Tag() + Err(L("OwnerLibraryNotFound", player)));
                 return;
             }
             var art = lib.Slots.FirstOrDefault(s => s.Slot == slot);
-            if (art == null) { player.ChatMessage(Tag() + Err($"Slot {slot} not found.")); return; }
+            if (art == null) { player.ChatMessage(Tag() + Err(L("SlotNotFoundShort", player, slot))); return; }
             // Cross-player preview requires public, an explicit share, or admin (v0.10.1).
             if (!CanAccessSlot(art, ownerId, (ulong)player.userID, player))
             {
-                player.ChatMessage(Tag() + Err("That slot is private."));
+                player.ChatMessage(Tag() + Err(L("SlotIsPrivate", player)));
                 return;
             }
             if (string.IsNullOrEmpty(art.BytesPath))
             {
-                player.ChatMessage(Tag() + Err("URL-only slots can't be previewed (no local bytes)."));
+                player.ChatMessage(Tag() + Err(L("SlotUrlOnlyPreview", player)));
                 return;
             }
 
@@ -3090,8 +3166,8 @@ namespace Oxide.Plugins
             var fullPath = Path.Combine(Interface.Oxide.DataDirectory, "SignArtSaver", art.BytesPath);
             byte[] bytes;
             try { bytes = File.ReadAllBytes(fullPath); }
-            catch (Exception e) { player.ChatMessage(Tag() + Err($"Failed to read PNG: {e.Message}")); return; }
-            if (bytes == null || bytes.Length == 0) { player.ChatMessage(Tag() + Err("PNG file is empty.")); return; }
+            catch (Exception e) { player.ChatMessage(Tag() + Err(L("PreviewReadFail", player, e.Message))); return; }
+            if (bytes == null || bytes.Length == 0) { player.ChatMessage(Tag() + Err(L("PreviewEmpty", player))); return; }
 
             // Tear down any prior preview before opening a new one.
             ClosePreview(player, panel, refreshPanel: false);
@@ -3104,10 +3180,10 @@ namespace Oxide.Plugins
             catch (Exception e)
             {
                 PrintWarning($"FileStorage.Store for preview failed: {e.Message}");
-                player.ChatMessage(Tag() + Err("Couldn't register preview image."));
+                player.ChatMessage(Tag() + Err(L("PreviewRegisterFail", player)));
                 return;
             }
-            if (crc == 0) { player.ChatMessage(Tag() + Err("Preview image rejected by FileStorage.")); return; }
+            if (crc == 0) { player.ChatMessage(Tag() + Err(L("PreviewRejected", player))); return; }
 
             panel.PreviewCrc = crc;
             panel.PreviewOwnerId = ownerId;
@@ -3148,11 +3224,11 @@ namespace Oxide.Plugins
 
             if (!store.Players.TryGetValue(ownerId, out var lib))
             {
-                player.ChatMessage(Tag() + Err("Owner library not found."));
+                player.ChatMessage(Tag() + Err(L("OwnerLibraryNotFound", player)));
                 return;
             }
             var art = lib.Slots.FirstOrDefault(s => s.Slot == slot);
-            if (art == null) { player.ChatMessage(Tag() + Err($"Slot {slot} no longer exists.")); return; }
+            if (art == null) { player.ChatMessage(Tag() + Err(L("SlotNoLongerExists", player, slot))); return; }
 
             // Tear down preview + main panel so the player has a clear view.
             ClosePreview(player, panel, refreshPanel: false);
@@ -3171,6 +3247,7 @@ namespace Oxide.Plugins
                 ArmedUtc = DateTime.UtcNow,
                 TargetUserId = ownerId == (ulong)player.userID ? 0UL : ownerId,
             };
+            ArmInputHook();
             player.ChatMessage(Tag() + Ok(L("SlotArmedNamed", player, slot, EscapeRich(art.Name), config.PendingApplyTimeoutSeconds)));
         }
 
@@ -3197,12 +3274,12 @@ namespace Oxide.Plugins
             RefreshBrowsePanel(player);
         }
 
-        // ---- Share modal (v0.10.2) ----
-        // Opens a player picker modal. Lists the artist's RelationshipManager contacts
-        // (Steam friends + acquaintances + recently-seen players that Rust already tracks
-        // for them), with online players sorted to the top. Click [Add] on a row to share.
-        // The "Aim at player" fallback button is still available for when the buyer is
-        // physically standing right next to the artist.
+        // ---- Share modal ----
+        // Opens a player picker modal. Lists online players first (always visible) and,
+        // when an explicit search query is typed, the matching offline players from the
+        // KnownPlayers roster. Click [Add] on a row to share. The "Aim at player" fallback
+        // button is still available for when the buyer is physically standing right next
+        // to the artist.
         [ConsoleCommand("signartsaver.ui.share.open")]
         private void CcUiShareOpen(ConsoleSystem.Arg arg)
         {
@@ -3213,10 +3290,10 @@ namespace Oxide.Plugins
             if (!openPanels.TryGetValue(player.userID, out var panel)) return;
             var lib = store.Players.TryGetValue((ulong)player.userID, out var l) ? l : null;
             var art = lib?.Slots.FirstOrDefault(s => s.Slot == slot);
-            if (art == null) { player.ChatMessage(Tag() + Err($"Slot {slot} not found.")); return; }
+            if (art == null) { player.ChatMessage(Tag() + Err(L("SlotNotFoundShort", player, slot))); return; }
             if (string.IsNullOrEmpty(art.BytesPath))
             {
-                player.ChatMessage(Tag() + Err($"Slot {slot} is URL-only; can't share without bytes."));
+                player.ChatMessage(Tag() + Err(L("SlotUrlOnlyShare", player, slot)));
                 return;
             }
             panel.ShareModalSlot = slot;
@@ -3306,49 +3383,14 @@ namespace Oxide.Plugins
         }
 
         // Build the share-picker candidate list. Always includes currently-connected
-        // players + the artist's RelationshipManager contacts (Steam friends, etc.).
-        // The full KnownPlayers offline roster is exposed ONLY when an explicit search
-        // query (length ≥ 2) is active — without that gate the picker leaks every steamid
-        // + display name that has ever connected to anyone with /saveart open. The
-        // search-gating limits the leak to names the artist already knows enough to type.
-        // relType: 0=None, 1=Acquaintance, 2=Friend, 3=Enemy.
-        private List<(ulong steamId, string name, int relType, bool online)> GetPickerCandidates(BasePlayer player, string searchQuery)
+        // players. The full KnownPlayers offline roster is exposed ONLY when an explicit
+        // search query (length ≥ 2) is active — without that gate the picker would leak
+        // every steamid + display name that has ever connected. The search-gating limits
+        // the leak to names the artist already knows enough to type.
+        private List<(ulong steamId, string name, bool online)> GetPickerCandidates(BasePlayer player, string searchQuery)
         {
-            var result = new List<(ulong, string, int, bool)>();
+            var result = new List<(ulong, string, bool)>();
             if (player == null) return result;
-            ulong me = (ulong)player.userID;
-
-            // Tags lookup (informational only).
-            var tags = new Dictionary<ulong, int>();
-            try
-            {
-                var rmType = typeof(RelationshipManager);
-                var serverField = rmType.GetField("ServerInstance", BindingFlags.Public | BindingFlags.Static);
-                var server = serverField?.GetValue(null);
-                if (server != null)
-                {
-                    var relsField = rmType.GetField("relationships", BindingFlags.Public | BindingFlags.Instance);
-                    var rels = relsField?.GetValue(server) as System.Collections.IDictionary;
-                    if (rels != null && rels.Contains(me))
-                    {
-                        var myRels = rels[me];
-                        var relationsField = myRels?.GetType().GetField("relations", BindingFlags.Public | BindingFlags.Instance);
-                        var relations = relationsField?.GetValue(myRels) as System.Collections.IDictionary;
-                        if (relations != null)
-                        {
-                            foreach (System.Collections.DictionaryEntry kv in relations)
-                            {
-                                if (kv.Value == null) continue;
-                                ulong sid = Convert.ToUInt64(kv.Key);
-                                if (sid == me) continue;
-                                int relType = Convert.ToInt32(kv.Value.GetType().GetField("type", BindingFlags.Public | BindingFlags.Instance)?.GetValue(kv.Value) ?? 0);
-                                tags[sid] = relType;
-                            }
-                        }
-                    }
-                }
-            }
-            catch { /* tag lookup is optional; swallow */ }
 
             var seen = new HashSet<ulong>();
 
@@ -3361,20 +3403,8 @@ namespace Oxide.Plugins
                 if (p == null || !p.userID.IsSteamId()) continue;
                 ulong sid = (ulong)p.userID;
                 string n = !string.IsNullOrEmpty(p.displayName) ? p.displayName : ResolveDisplayName(sid);
-                int relType = tags.TryGetValue(sid, out var t) ? t : 0;
-                result.Add((sid, n, relType, true));
+                result.Add((sid, n, true));
                 seen.Add(sid);
-            }
-
-            // Tagged contacts (Steam friends / acquaintances) — always shown even when
-            // offline. They're already in the artist's Steam roster, so no privacy leak.
-            foreach (var kv in tags)
-            {
-                if (seen.Contains(kv.Key)) continue;
-                if (kv.Value == 0 || kv.Value == 3) continue; // None or Enemy not whitelisted by default
-                string n = ResolveDisplayName(kv.Key);
-                result.Add((kv.Key, n, kv.Value, false));
-                seen.Add(kv.Key);
             }
 
             // Full roster — only when search query is non-trivial. Matching also restricted
@@ -3390,8 +3420,7 @@ namespace Oxide.Plugins
                     string n = kv.Value?.Name;
                     if (string.IsNullOrEmpty(n)) continue;
                     if (n.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                    int relType = tags.TryGetValue(kv.Key, out var t) ? t : 0;
-                    result.Add((kv.Key, n, relType, false));
+                    result.Add((kv.Key, n, false));
                     seen.Add(kv.Key);
                 }
             }
@@ -3426,15 +3455,11 @@ namespace Oxide.Plugins
             string q = (panel.ShareModalSearch ?? "").Trim().ToLowerInvariant();
             if (q.Length > 0)
                 candidates = candidates.Where(c => c.name.ToLowerInvariant().Contains(q)).ToList();
-            // Sort: online first, then friends > acquaintances > none > enemies, then alphabetical.
+            // Sort: online first, then alphabetical.
             candidates.Sort((a, b) =>
             {
                 int ao = a.online ? 0 : 1, bo = b.online ? 0 : 1;
                 if (ao != bo) return ao - bo;
-                // Friend (2) > Acquaintance (1) > None (0) > Enemy (3 — sort to bottom)
-                int aRank = a.relType == 3 ? -1 : a.relType;
-                int bRank = b.relType == 3 ? -1 : b.relType;
-                if (aRank != bRank) return bRank - aRank;
                 return string.Compare(a.name, b.name, StringComparison.OrdinalIgnoreCase);
             });
 
@@ -3614,7 +3639,7 @@ namespace Oxide.Plugins
                 ulong meId = (ulong)player.userID;
                 for (int i = 0; i < pageRows.Count; i++)
                 {
-                    var (sid, name, _, _) = pageRows[i];
+                    var (sid, name, _) = pageRows[i];
                     bool isSelf = sid == meId;
                     float yMax = 1f - i * rowH;
                     float yMin = yMax - rowH;
@@ -3625,8 +3650,8 @@ namespace Oxide.Plugins
                         RectTransform = { AnchorMin = $"0 {yMin}", AnchorMax = $"1 {yMax}" },
                     }, listSection, rowId);
 
-                    // Privacy: show only the player name. Online/offline + relationship type
-                    // are still used internally for sort priority but never displayed.
+                    // Privacy: show only the player name. Online/offline is used internally
+                    // for sort priority but never displayed.
                     string nameDisplay = isSelf
                         ? $"<color=#ffe699>{EscapeRich(name)}</color> <color=#888>(you)</color>"
                         : $"<color=#ffe699>{EscapeRich(name)}</color>";
@@ -3782,7 +3807,7 @@ namespace Oxide.Plugins
                 !panel.PendingDeleteArmedUtc.HasValue ||
                 (DateTime.UtcNow - panel.PendingDeleteArmedUtc.Value).TotalSeconds > config.ConfirmDeleteSeconds)
             {
-                player.ChatMessage(Tag() + Warn("Confirm window expired — click Delete again."));
+                player.ChatMessage(Tag() + Warn(L("ConfirmWindowExpired", player)));
                 panel.PendingDeleteSlot = null;
                 panel.PendingDeleteArmedUtc = null;
                 RefreshBrowsePanel(player);
@@ -3792,13 +3817,13 @@ namespace Oxide.Plugins
             ulong target = panel.AdminTargetId != 0 ? panel.AdminTargetId : (ulong)player.userID;
             var lib = store.Players.TryGetValue(target, out var l) ? l : null;
             int idx = lib?.Slots.FindIndex(s => s.Slot == slot) ?? -1;
-            if (idx < 0) { player.ChatMessage(Tag() + Err($"Slot {slot} no longer exists.")); panel.PendingDeleteSlot = null; panel.PendingDeleteArmedUtc = null; RefreshBrowsePanel(player); return; }
+            if (idx < 0) { player.ChatMessage(Tag() + Err(L("SlotNoLongerExists", player, slot))); panel.PendingDeleteSlot = null; panel.PendingDeleteArmedUtc = null; RefreshBrowsePanel(player); return; }
             DeleteSlotPng(lib.Slots[idx]);
             lib.Slots.RemoveAt(idx);
             StampLib(lib);
             panel.PendingDeleteSlot = null;
             panel.PendingDeleteArmedUtc = null;
-            player.ChatMessage(Tag() + Ok($"Removed slot {slot}."));
+            player.ChatMessage(Tag() + Ok(L("SlotRemoved", player, slot)));
             RefreshBrowsePanel(player);
         }
 
@@ -4864,17 +4889,14 @@ namespace Oxide.Plugins
             player != null && (permission.UserHasPermission(player.UserIDString, PermAdmin) || player.IsAdmin);
 
         // Order matters: Rust's class hierarchy currently makes Signage / PhotoFrame /
-        // CarvablePumpkin / PaintedItemStorageEntity all siblings (under BaseEntity), so any
-        // order works today. But we check most-derived FIRST as defense against a future
-        // Rust patch that promotes one of them to a base class — without this guard, a
-        // PhotoFrame would silently route through the Signage branch and write to the wrong
-        // texture field. Subclasses we already handle correctly via "is" matching:
+        // CarvablePumpkin all siblings (under BaseEntity), so any order works today. But we
+        // check most-derived FIRST as defense against a future Rust patch that promotes one
+        // of them to a base class — without this guard, a PhotoFrame would silently route
+        // through the Signage branch and write to the wrong texture field. Subclasses we
+        // already handle correctly via "is" matching:
         //   OrnateFrame, FlagTogglePhotoFrame  → PhotoFrame branch (extend PhotoFrame)
-        //   SpinnerWheel, ReactiveTarget,
-        //   PaintableReactiveTarget            → Signage branch (extend Signage)
         private string ResolveKind(BaseEntity entity)
         {
-            if (entity is PaintedItemStorageEntity) return KindPaintedItem;
             if (entity is PhotoFrame) return KindPhotoFrame;
             if (entity is CarvablePumpkin) return KindPumpkin;
             if (entity is Signage) return KindSign;
@@ -5163,30 +5185,6 @@ namespace Oxide.Plugins
                         FileStorage.server.Remove(existing, FileStorage.Type.png, entity.net.ID);
                     pumpkin.textureIDs[textureIndex] = newCrc;
                     pumpkin.SendNetworkUpdate();
-                }
-                else if (targetKind == KindPaintedItem && entity is PaintedItemStorageEntity painted)
-                {
-                    // PaintedItemStorageEntity (drawable windows, paintable reactive target,
-                    // others) keeps its CRC in private _currentImageCrc. Sign Artist v1.4.6
-                    // doesn't have a wrapper class for this entity at all — SignArtSaver is the
-                    // only path. We mirror the engine's Server_UpdateImage RPC: Remove old,
-                    // Store new, set field, SendNetworkUpdate. textureIndex is ignored (single
-                    // CRC only, like PhotoFrame).
-                    if (_paintedItemCrcField == null)
-                    {
-                        error = "PaintedItemStorageEntity._currentImageCrc reflection failed (Rust patch may have renamed the field)";
-                        return false;
-                    }
-                    uint existing = 0u;
-                    try { existing = (uint)_paintedItemCrcField.GetValue(painted); }
-                    catch (Exception e) { error = $"reflection get failed: {e.Message}"; return false; }
-                    newCrc = FileStorage.server.Store(bytes, FileStorage.Type.png, entity.net.ID);
-                    if (newCrc == 0) { error = "FileStorage rejected the bytes"; return false; }
-                    if (existing != 0 && existing != newCrc)
-                        FileStorage.server.Remove(existing, FileStorage.Type.png, entity.net.ID);
-                    try { _paintedItemCrcField.SetValue(painted, newCrc); }
-                    catch (Exception e) { error = $"reflection set failed: {e.Message}"; return false; }
-                    painted.SendNetworkUpdate();
                 }
                 else { error = $"unsupported entity kind '{targetKind}' for entity {entity.GetType().Name}"; return false; }
                 return true;

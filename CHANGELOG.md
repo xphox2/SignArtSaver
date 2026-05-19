@@ -3,6 +3,46 @@
 All notable changes to SignArtSaver will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.12] — 2026-05-19
+
+uMod-submission compliance pass. The previous 0.11.11 release went out to GitHub
+without an audit against [uMod's plugin standards](https://umod.org/plugins/create);
+this release closes the gaps.
+
+### Removed
+- **Drawable windows, paintable reactive targets, and spinning wheels** (the
+  `PaintedItemStorageEntity` subclasses) are no longer supported. The write
+  path required `System.Reflection` to set a private `_currentImageCrc` field,
+  which uMod forbids in submitted plugins. Standard signs, photo frames,
+  banners, hanging signs, neon signs, artist canvases, carvable pumpkins, and
+  all DLC art frames are unchanged.
+- **Friends-list sorting in the share picker.** Used `System.Reflection` to
+  read `RelationshipManager.relationships` and tag picker entries as Friend /
+  Acquaintance / Enemy for sort priority. The picker still works — online
+  players sort first, then alphabetical, then (on explicit search) the offline
+  roster. Steam friends just no longer get a sort boost.
+
+### Changed
+- **Lang coverage: 41 → 115 keys.** Every player-facing string now routes
+  through the Lang API — usage hints, help-body text, share/unshare overviews,
+  `/saveart debug` raycast output, the whole confirmation/error surface.
+  Operator-only `Puts`/`PrintWarning`/`PrintError` stay English by design.
+- **`OnPlayerInput` is now subscribed dynamically.** The hook is off by default
+  and only subscribes while at least one pending save / apply / import is armed
+  (per-player USE-key listener). Drops to no-op when all three pending
+  dictionaries empty out. Per uMod guideline against always-on hot hooks.
+- **`// Requires: SignArtist` directive** added at the top of the plugin so
+  Oxide defers the load until the dependency is available, instead of
+  self-unloading at PostLoadSetup time.
+
+### Notes
+- This is the first release prepared for the uMod plugin listing. The GitHub
+  repo and the uMod page will track the same version numbers from here.
+- Operators upgrading existing libraries: persisted slots whose `EntityKind`
+  is `"PaintedItem"` are NOT deleted — they remain in the JSON, but apply
+  attempts on them will produce a friendly "unsupported entity kind" error.
+  Remove them via `/saveart remove <slot>` at your leisure.
+
 ## [0.11.11] — 2026-05-19
 
 Final CTO-pass before the public release. Four parallel reviewer agents

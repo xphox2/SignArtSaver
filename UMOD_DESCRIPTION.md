@@ -4,7 +4,7 @@
 
 ---
 
-**SignArtSaver** is a per-player image library for Rust signs, photo frames, banners, carvable pumpkins, paintable windows, neon signs, artist canvases, and reactive targets. Built on top of [Sign Artist](https://umod.org/plugins/sign-artist) (Whispers88, required dependency) to give every artist on your server a persistent gallery of their work that survives wipes.
+**SignArtSaver** is a per-player image library for Rust signs, photo frames, banners, carvable pumpkins, neon signs, and artist canvases. Built on top of [Sign Artist](https://umod.org/plugins/sign-artist) (Whispers88, required dependency) to give every artist on your server a persistent gallery of their work that survives wipes.
 
 **Two capture paths, one library.** Paint with `/sil <url>` as usual and SignArtSaver auto-snapshots both the URL and the rendered PNG bytes. Or aim at any painted sign — vanilla pixel-painter, CopyPaste import, Sign Artist alike — and click **Save Sign** to capture the bytes directly. Apply prefers bytes (no re-download, no Discord-CDN expiry), auto-resizes to the target canvas, and falls back to URL when needed.
 
@@ -12,7 +12,7 @@
 
 **Self-heal for blank signs.** A connect-time pass (and optional periodic timer) re-applies cached bytes if a tracked sign ever blanks server-side — decay, raid damage, vanilla painter wipes, or the occasional engine glitch. Ownership is re-checked at heal time, so a base that's changed hands won't get someone else's art painted back onto it.
 
-**Carbon and Oxide compatible.** Hard dep on Sign Artist; no other plugin coupling. The most-visible player-facing strings — error responses, permission denials, common confirmations — live in `oxide/lang/<locale>/SignArtSaver.json` and are ready for community translation (41 keys today; fuller coverage planned). Two permissions: `signartsaver.use` (auto-granted to the `default` group, configurable) and `signartsaver.admin` (cross-library management).
+**Carbon and Oxide compatible.** Hard dep on Sign Artist; no other plugin coupling. Every player-facing string is lang-routed (115 keys) and ready for community translation. Two permissions: `signartsaver.use` (auto-granted to the `default` group, configurable) and `signartsaver.admin` (cross-library management).
 
 ---
 
@@ -33,11 +33,11 @@
 
 ## Coverage
 
-Signage, PhotoFrame, CarvablePumpkin, PaintedItemStorageEntity (drawable windows, paintable reactive targets), artist canvases, neon signs, hanging banners, photo frames (all DLC variants).
+Signage (wooden signs, hanging signs, sign posts, banners, neon signs, artist canvases), PhotoFrame (photo frames + DLC art frames — light-up, gold, scrap), CarvablePumpkin.
 
 ## Requirements
 
-- Rust dedicated server (current build with `PaintedItemStorageEntity`).
+- Rust dedicated server.
 - Sign Artist plugin by Whispers88, v1.4.x. *Hard dep — SignArtSaver self-unloads if absent.*
 - `libgdiplus` on Linux hosts. Install BEFORE first server start.
 - Carbon framework recommended; Oxide-compatible.
