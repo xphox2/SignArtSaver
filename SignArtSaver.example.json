@@ -21,7 +21,7 @@
   "Max public slots per player (cap on Public Gallery contribution; 0 = unlimited; 1-500)": 25,
   "Pending-apply timeout (seconds; armed slot expires if no USE-key)": 30.0,
   "Aim distance for /saveart save and /saveart apply raycasts (meters; 1-30)": 8.0,
-  "Max PNG bytes per saved slot (defense-in-depth disk-fill guard; Rust's engine already caps PNG uploads near 2MB)": 4194304,
+  "Max PNG bytes per saved slot (defense-in-depth disk-fill guard; Rust's engine already caps PNG uploads near 2MB)": 2097152,
   "Self-heal: re-apply cached bytes when an applied sign loses its CRC or FileStorage row": true,
   "Self-heal: max repairs per applied-entity in a 24h window before it's flagged and skipped": 3,
   "Self-heal: clone bytes into the applier's own library when applying someone else's shared slot (so artist deletions don't orphan buyer art)": true,

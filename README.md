@@ -118,7 +118,7 @@ The full default config is also shipped as [`SignArtSaver.example.json`](SignArt
 |---|---|---|
 | `Slots per player (1-500)` | `50` | Per-player library cap. |
 | `Max public slots per player...` | `25` | Cap on Public Gallery contribution. `0` = unlimited. Admins bypass. |
-| `Max PNG bytes per saved slot...` | `4194304` (4 MiB) | Defense-in-depth disk-fill guard. Rust's engine already caps PNG uploads near 2 MiB. |
+| `Max PNG bytes per saved slot...` | `2097152` (2 MiB) | Matches Rust's FileStorage upload cap. Raise it and slots above 2 MiB save but never apply — the plugin warns at load if you do. Lower freely for disk hygiene. |
 | `Strip query string when hashing for dedupe` | `true` | Treats `?token=...` variants of the same URL as duplicates. |
 | `Block URLs containing these substrings...` | `["token=","auth=","Authorization","?key="]` | Substring blocklist for auto-capture. The cross-library URL-fallback path is also denied for IP literals and private TLDs (`.local`, `.internal`, `.localhost`, `.lan`, `.home`). |
 | `Warn when saving Discord CDN URLs (they expire ~24h)` | `true` | Saved anyway; the warning suggests imgur / GitHub raw / self-hosted for wipe-survival. |

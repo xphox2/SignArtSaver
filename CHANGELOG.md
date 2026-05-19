@@ -3,91 +3,20 @@
 All notable changes to SignArtSaver will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.11.12] — 2026-05-19
-
-uMod-submission compliance pass. The previous 0.11.11 release went out to GitHub
-without an audit against [uMod's plugin standards](https://umod.org/plugins/create);
-this release closes the gaps.
-
-### Removed
-- **Drawable windows, paintable reactive targets, and spinning wheels** (the
-  `PaintedItemStorageEntity` subclasses) are no longer supported. The write
-  path required `System.Reflection` to set a private `_currentImageCrc` field,
-  which uMod forbids in submitted plugins. Standard signs, photo frames,
-  banners, hanging signs, neon signs, artist canvases, carvable pumpkins, and
-  all DLC art frames are unchanged.
-- **Friends-list sorting in the share picker.** Used `System.Reflection` to
-  read `RelationshipManager.relationships` and tag picker entries as Friend /
-  Acquaintance / Enemy for sort priority. The picker still works — online
-  players sort first, then alphabetical, then (on explicit search) the offline
-  roster. Steam friends just no longer get a sort boost.
-
-### Changed
-- **Lang coverage: 41 → 115 keys.** Every player-facing string now routes
-  through the Lang API — usage hints, help-body text, share/unshare overviews,
-  `/saveart debug` raycast output, the whole confirmation/error surface.
-  Operator-only `Puts`/`PrintWarning`/`PrintError` stay English by design.
-- **`OnPlayerInput` is now subscribed dynamically.** The hook is off by default
-  and only subscribes while at least one pending save / apply / import is armed
-  (per-player USE-key listener). Drops to no-op when all three pending
-  dictionaries empty out. Per uMod guideline against always-on hot hooks.
-- **`// Requires: SignArtist` directive** added at the top of the plugin so
-  Oxide defers the load until the dependency is available, instead of
-  self-unloading at PostLoadSetup time.
-
-### Notes
-- This is the first release prepared for the uMod plugin listing. The GitHub
-  repo and the uMod page will track the same version numbers from here.
-- Operators upgrading existing libraries: persisted slots whose `EntityKind`
-  is `"PaintedItem"` are NOT deleted — they remain in the JSON, but apply
-  attempts on them will produce a friendly "unsupported entity kind" error.
-  Remove them via `/saveart remove <slot>` at your leisure.
-
-## [0.11.11] — 2026-05-19
-
-Final CTO-pass before the public release. Four parallel reviewer agents
-(security, correctness/lifecycle, docs/release-readiness, code-quality)
-re-audited the 0.11.10 build and surfaced six items worth fixing.
-
-### Fixed
-- **Decompression-bomb guard in `TryResizePngBytes`** — apply / self-heal /
-  admin-apply paths now refuse PNGs whose IHDR dimensions would decode
-  beyond a 64 MiB RGBA budget (or are unreadable / out of the 8192-per-side
-  sanity bound). Previously a 4 MiB flat-color PNG that decompressed to GBs
-  of RGBA could OOM-kill the server through the public-gallery surface.
-- **Self-heal ownership re-check ungated** — the entity-owner-vs-applier
-  comparison at heal time now runs unconditionally, regardless of the
-  `Require entity ownership for apply` config. Heal-time ownership is a
-  safety property (don't silently repaint someone else's deployed sign
-  post-raid), not a permission policy.
-- **Share-modal contact list color tag** — the share modal's recipient
-  names rendered default white because the rich-text tag was a malformed
-  `<color=#1 0.95 0.6 1>` (stray `#` on rgba floats). Now `<color=#ffe699>`.
-- **`UiShareModal` cleanup** — `DestroyAllUi` now tears down the share
-  modal alongside the other CUI elements; previously a player who
-  disconnected with the share modal open (or an Unload while it was open)
-  left orphan CUI on the client until next reconnect.
-
-### Documentation
-- **README** — softened the URL safety-check description to honestly
-  describe a deny-list (IP literals + private TLDs `.local`/`.internal`/etc.)
-  rather than implying a host-allowlist that doesn't exist.
-- **README + UMOD_DESCRIPTION** — trimmed the localization claim. ~41
-  high-traffic keys (error responses, permission denials, common
-  confirmations) are lang-routed today; usage hints, help-body text, and
-  share/unshare overviews are English-only. Full coverage planned.
-
-## [0.11.10] — 2026-05-19
+## [0.11.13] — 2026-05-19
 
 First public release. The plugin has been in private development for some time;
-this is the first version cleaned up and audited for general use. The 0.x version
-line reflects the development history, not the maturity — the audit covered every
-hook handler, every public surface, and the security/correctness/lifecycle/
-release-readiness dimensions were each handled by a separate reviewer pass.
+this is the first version cleaned up and audited for general use. The 0.x
+version line reflects the development history, not the maturity — the audit
+covered every hook handler and public surface, with security, correctness,
+lifecycle, release-readiness, and code-quality each handled by a separate
+reviewer pass, plus a separate compliance pass against uMod's plugin-submission
+standards.
 
 ### Added
-- Per-player image library for painted signs, photo frames, carvable pumpkins,
-  paintable windows, neon signs, artist canvases, and reactive targets.
+- Per-player image library for painted signs, photo frames, hanging signs, sign
+  posts, banners, neon signs, artist canvases, carvable pumpkins, and all DLC
+  art frames (light-up, gold, scrap).
 - Auto-capture URL + bytes from Sign Artist's `OnImagePost` (deferred poll so
   bytes are captured AFTER Sign Artist's download coroutine finishes; not
   before — see notes).
@@ -103,10 +32,18 @@ release-readiness dimensions were each handled by a separate reviewer pass.
   "Shared with me" tab.
 - Self-heal: on player connect (and optional periodic timer), the plugin
   re-applies cached bytes to any tracked sign whose CRC has been zeroed
-  server-side (decay / engine glitch / pixel-painter wipe). Drops the tracking
-  record if the entity's owner has changed.
+  server-side (decay / engine glitch / pixel-painter wipe). Heal-time
+  ownership re-check is unconditional — drops the tracking record if the
+  entity's owner has changed since the original apply.
 - Admin moderation: `/saveart admin <steamid> <list|apply|rename|remove|publish|unpublish> <slot>`.
-- Oxide lang file with 41 keyed strings; ready for community translation.
+- Oxide lang file with 115 keyed strings — every player-facing message
+  (usage hints, errors, confirmations, help body, share/unshare overviews,
+  `/saveart debug` raycast output) is translatable.
+- Decompression-bomb guard on apply: PNGs whose IHDR dimensions would
+  decode beyond a 64 MiB RGBA budget (or are outside an 8192-per-side sanity
+  bound) are refused before allocation.
+- Dynamic `OnPlayerInput` hook subscription — only active while at least
+  one pending save / apply / import is armed.
 
 ### Configuration defaults
 | Key | Default | Notes |
@@ -118,19 +55,35 @@ release-readiness dimensions were each handled by a separate reviewer pass.
 | `Strict entity-kind match on apply` | `true` | Sign-to-sign, frame-to-frame, etc. |
 | `Self-heal: enabled` | `true` | Survives raid / decay blanking. |
 | `Max public slots per player` | `25` | Public Gallery contribution cap. |
-| `Max PNG bytes per saved slot` | `4194304` | 4 MiB; Rust's engine caps ~2 MiB. |
+| `Max PNG bytes per saved slot` | `2097152` | 2 MiB; matches Rust's FileStorage upload cap. Lower freely for disk hygiene; raising above 2 MiB triggers a startup warning since slots above the engine cap save but never apply. |
+
+The full default config is also shipped as
+[`SignArtSaver.example.json`](SignArtSaver.example.json) — copy it to your
+config dir for a fresh install, or diff it against your running config to see
+what you've customized.
 
 ### Permissions
 - `signartsaver.use` — base. Auto-granted to the `default` group on first load (configurable via `Auto-grant signartsaver.use to default group on startup`).
 - `signartsaver.admin` — bypass ownership; manage other players' libraries; access `/saveart debug`.
 
 ### Requirements
-- Rust dedicated server (any current build with `PaintedItemStorageEntity`).
-- Sign Artist plugin by Whispers88, v1.4.x (hard dependency — plugin self-unloads if absent).
-- `libgdiplus` on Linux hosts. Install BEFORE starting RustDedicated; the System.Drawing path is initialized once at process startup.
+- Rust dedicated server (current build).
+- Sign Artist plugin by Whispers88, v1.4.x (hard dependency — `// Requires: SignArtist` directive defers load until the dep is available).
+- `libgdiplus` on Linux hosts. Install BEFORE starting RustDedicated; the `System.Drawing` path is initialized once at process startup.
 - Carbon framework recommended; Oxide-compatible.
 
+### uMod compliance
+- No `System.Reflection` usage anywhere in the plugin.
+- Every player-facing string routes through the Lang API (115 keys; English
+  defaults auto-generated, drop-in translations supported).
+- `OnPlayerInput` is subscribed dynamically — off by default, only active
+  while a player has a pending save / apply / import.
+- Permission system gates every entry point (`signartsaver.use` /
+  `signartsaver.admin`); permissions auto-register on first load.
+- Operator-friendly clamps + warnings in `ValidateConfig` for every
+  configurable knob.
+
 ### Notes
-- The `[JsonProperty]` description strings ARE the config keys — editing one between versions resets that field to the new default on upgrade. v1.0 onwards we'll treat these as stable. (If you're upgrading from a 0.x build, double-check `HidePvxOnSignAim` after first reload.)
+- The `[JsonProperty]` description strings ARE the config keys — editing one between versions resets that field to the new default on upgrade. v1.0 onwards we'll treat these as stable.
 - Sign Artist's `OnImagePost` fires synchronously before its download coroutine finishes. The byte capture is deferred via a 5-second retry-poll on the entity's CRC; if the URL is slow or Sign Artist times out, the slot is saved URL-only and bytes can be back-filled later via `/saveart save` while aimed at the sign.
-- Cross-library applies (Public Gallery, Shared-with-me) refuse URL fallback — prevents server-side SSRF via artist-controlled URLs when a bytes file is missing.
+- Cross-library applies (Public Gallery, Shared-with-me) refuse URL fallback — prevents server-side SSRF via artist-controlled URLs when a bytes file is missing. IP-literal hosts and private TLDs (`.local`, `.internal`, `.localhost`, `.lan`, `.home`) are also denied on this path.

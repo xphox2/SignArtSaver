@@ -74,7 +74,7 @@ using SDRectangle = System.Drawing.Rectangle;
 
 namespace Oxide.Plugins
 {
-    [Info("SignArtSaver", "Xphox", "0.11.12")]
+    [Info("SignArtSaver", "Xphox", "0.11.13")]
     [Description("Per-player image library with public gallery: byte-mode save + auto-resize on apply + Sign Artist URL capture + self-heal on connect/timer. Covers Signage, PhotoFrame, CarvablePumpkin. Survives wipes.")]
     public class SignArtSaver : RustPlugin
     {
@@ -253,7 +253,7 @@ namespace Oxide.Plugins
             public float AimRangeMeters = 8f;
 
             [JsonProperty("Max PNG bytes per saved slot (defense-in-depth disk-fill guard; Rust's engine already caps PNG uploads near 2MB)")]
-            public int MaxBytesPerSlot = 4 * 1024 * 1024;
+            public int MaxBytesPerSlot = 2 * 1024 * 1024;
 
             // ---- Self-heal (v0.11.0) ----
             // Background: photo-frame and sign textureIDs can end up zeroed server-side without an
@@ -352,13 +352,22 @@ namespace Oxide.Plugins
             }
             // 64KiB floor — anything smaller refuses every reasonable PNG. 32MiB ceiling —
             // beyond that the engine wouldn't accept it anyway and the disk-fill protection
-            // becomes meaningless. Default 4MiB sits well above Rust's ~2MiB engine cap.
+            // becomes meaningless. Default 2MiB matches Rust's FileStorage cap.
             const int MinBytesPerSlot = 64 * 1024;
             const int MaxBytesPerSlotCap = 32 * 1024 * 1024;
+            const int RustEngineCap = 2 * 1024 * 1024;
             if (config.MaxBytesPerSlot < MinBytesPerSlot || config.MaxBytesPerSlot > MaxBytesPerSlotCap)
             {
                 PrintWarning($"Invalid MaxBytesPerSlot {config.MaxBytesPerSlot}; clamping.");
                 config.MaxBytesPerSlot = Mathf.Clamp(config.MaxBytesPerSlot, MinBytesPerSlot, MaxBytesPerSlotCap);
+            }
+            // Operator-friendly heads-up: raising MaxBytesPerSlot above Rust's ~2 MiB
+            // FileStorage cap doesn't unlock bigger working slots — the engine still
+            // rejects, the apply still fails. The save will write the bytes to disk
+            // but every apply attempt produces an empty CRC. Keep the value but warn.
+            if (config.MaxBytesPerSlot > RustEngineCap)
+            {
+                PrintWarning($"MaxBytesPerSlot is {config.MaxBytesPerSlot} bytes ({config.MaxBytesPerSlot / 1024 / 1024} MiB). Rust's FileStorage caps PNG uploads near 2 MiB; saved slots above that limit will be stored but will never apply. Lower to {RustEngineCap} or below to avoid silently-broken slots.");
             }
         }
 
