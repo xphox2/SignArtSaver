@@ -1,0 +1,30 @@
+{
+  "Auto-capture URLs from OnImagePost": true,
+  "Slots per player (1-500)": 50,
+  "Require entity ownership for save": true,
+  "Require entity ownership for apply (admin perm bypasses)": true,
+  "Strict entity-kind match on apply (refuse PhotoFrame->Sign etc.)": true,
+  "CUI rows per page (4-16)": 8,
+  "Truncate URL display length (16-120)": 40,
+  "Confirm-delete window (seconds, 1-30)": 5.0,
+  "Wipe-confirm window (seconds, 5-60)": 10.0,
+  "Apply cooldown per player (seconds, 0-30)": 2.0,
+  "Strip query string when hashing for dedupe": true,
+  "Block URLs containing these substrings (case-insensitive)": [
+    "token=",
+    "auth=",
+    "Authorization",
+    "?key="
+  ],
+  "Warn when saving Discord CDN URLs (they expire ~24h)": true,
+  "Auto-grant signartsaver.use to default group on startup": true,
+  "Max public slots per player (cap on Public Gallery contribution; 0 = unlimited; 1-500)": 25,
+  "Pending-apply timeout (seconds; armed slot expires if no USE-key)": 30.0,
+  "Aim distance for /saveart save and /saveart apply raycasts (meters; 1-30)": 8.0,
+  "Max PNG bytes per saved slot (defense-in-depth disk-fill guard; Rust's engine already caps PNG uploads near 2MB)": 4194304,
+  "Self-heal: re-apply cached bytes when an applied sign loses its CRC or FileStorage row": true,
+  "Self-heal: max repairs per applied-entity in a 24h window before it's flagged and skipped": 3,
+  "Self-heal: clone bytes into the applier's own library when applying someone else's shared slot (so artist deletions don't orphan buyer art)": true,
+  "Self-heal diagnostic: verbose per-entity logging (off=quiet; on=one log line per scanned slot with state details)": false,
+  "Self-heal diagnostic: periodic scan interval in minutes (0=off; 1-60=enabled). Helps bracket WHEN a trigger fires by running the verify pass for online players on a recurring timer instead of only on connect.": 0
+}

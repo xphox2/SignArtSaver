@@ -110,6 +110,8 @@ Admins bypass the per-player public-gallery cap.
 
 Generated at `oxide/config/SignArtSaver.json` (Carbon: `carbon/configs/SignArtSaver.json`) on first load. Most defaults work for a typical server; adjust as needed.
 
+The full default config is also shipped as [`SignArtSaver.example.json`](SignArtSaver.example.json) — copy it to your config dir for a fresh install, or diff it against your running config to see what you've customized. Tables below explain each key.
+
 ### Library
 
 | Key | Default | Notes |
